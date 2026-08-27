@@ -1,0 +1,84 @@
+# ============================================================
+# TorqueERP — root .gitignore
+# Secrets, machine-local config and build output never enter git.
+# ============================================================
+
+# ---------- Environment & secrets ----------
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Google / Firebase service configuration (supply locally — see android/SETUP.md)
+**/google-services.json
+**/service-account*.json
+**/*serviceAccount*.json
+
+# Android signing (supply locally — see android/SETUP.md)
+*.jks
+*.keystore
+**/keystore.properties
+android/keystore/
+
+# Private keys / certificates
+*.pem
+*.p12
+*.key
+*.crt
+
+# ---------- Node / web ----------
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---------- Backend ----------
+backend/dist/
+backend/prisma/*.db
+backend/prisma/*.db-journal
+backend/public/downloads/*.apk
+
+# ---------- Android / Gradle / Kotlin ----------
+android/.gradle/
+android/build/
+android/app/build/
+android/app/release/
+android/local.properties
+android/captures/
+.gradle/
+build/
+*.aab
+*.apk
+!docs/**/*.apk
+output-metadata.json
+
+# ---------- IDE ----------
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+
+# ---------- OS ----------
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ---------- Misc / local tooling ----------
+*.log
+*.tmp
+coverage/
+.cache/
+skills-lock.json
+web/public/downloads/*.apk
+
+# Local AI tooling
+.agents/
+.claude/
