@@ -2,7 +2,7 @@
 // Supports SQLite for fast local development/testing and PostgreSQL for production
 
 datasource db {
-  provider = "mysql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -43,10 +43,10 @@ model Business {
   id                String           @id @default(uuid())
   name              String
   slug              String           @unique
-  logoUrl           String? @db.Text
+  logoUrl           String?
   phone             String?
   email             String?
-  address           String? @db.Text
+  address           String?
   city              String?
   state             String?
   pin               String?
@@ -118,7 +118,7 @@ model ProductCategory {
   id          String    @id @default(uuid())
   businessId  String
   name        String
-  description String? @db.Text
+  description String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -133,7 +133,7 @@ model ProductBrand {
   id          String    @id @default(uuid())
   businessId  String
   name        String
-  description String? @db.Text
+  description String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -155,7 +155,7 @@ model Product {
   brand                String?
   category             String?
   subcategory          String?
-  description          String? @db.Text
+  description          String?
   mrp                  Float             @default(0.0)
   purchaseCost         Float             @default(0.0)
   sellingPrice         Float             @default(0.0)
@@ -164,9 +164,9 @@ model Product {
   maxStock             Int               @default(100)
   currentStock         Int               @default(0)
   supplierId           String?
-  imageUrl             String? @db.Text
-  vehicleCompatibility String? @db.Text           // JSON string or comma-separated vehicle models (e.g. Royal Enfield Classic 350, Bullet 500)
-  notes                String? @db.Text
+  imageUrl             String?
+  vehicleCompatibility String?           // JSON string or comma-separated vehicle models (e.g. Royal Enfield Classic 350, Bullet 500)
+  notes                String?
   isActive             Boolean           @default(true)
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
@@ -242,7 +242,7 @@ model StockMovement {
   referenceType String?      // 'PURCHASE', 'SALE', 'RETURN', 'MANUAL_ADJUSTMENT'
   referenceId   String?      // saleId, purchaseId, etc.
   userId        String?
-  notes         String? @db.Text
+  notes         String?
   createdAt     DateTime     @default(now())
 
   business      Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -265,11 +265,11 @@ model Supplier {
   company       String?
   phone         String?
   email         String?
-  address       String? @db.Text
+  address       String?
   gstin         String?
   contactPerson String?
   paymentTerms  String?
-  notes         String? @db.Text
+  notes         String?
   isActive      Boolean    @default(true)
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
@@ -301,7 +301,7 @@ model Purchase {
   balanceDue       Float          @default(0.0)
   paymentStatus    String         @default("UNPAID") // PAID, PARTIALLY_PAID, UNPAID
   paymentMethod    String?        @default("CASH")
-  notes            String? @db.Text
+  notes            String?
   attachmentUrl    String?
   status           String         @default("COMPLETED") // COMPLETED, CANCELLED
   createdAt        DateTime       @default(now())
@@ -349,11 +349,11 @@ model Customer {
   name          String
   phone         String?
   email         String?
-  address       String? @db.Text
+  address       String?
   gstin         String?
   vehicleNumber String?
   vehicleModel  String?
-  notes         String? @db.Text
+  notes         String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -384,7 +384,7 @@ model Sale {
   balanceDue         Float      @default(0.0)
   paymentStatus      String     @default("PAID") // PAID, PARTIALLY_PAID, UNPAID
   paymentMethod      String     @default("CASH")
-  notes              String? @db.Text
+  notes              String?
   status             String     @default("COMPLETED") // COMPLETED, CANCELLED, VOID
   createdAt          DateTime   @default(now())
   updatedAt          DateTime   @updatedAt
@@ -432,7 +432,7 @@ model Invoice {
   invoiceDate     DateTime  @default(now())
   customerName    String?
   customerPhone   String?
-  customerAddress String? @db.Text
+  customerAddress String?
   customerGstin   String?
   subtotal        Float     @default(0.0)
   discountAmount  Float     @default(0.0)
@@ -442,8 +442,8 @@ model Invoice {
   balanceDue      Float     @default(0.0)
   paymentStatus   String    @default("PAID")
   paymentMethod   String    @default("CASH")
-  notes           String? @db.Text
-  pdfUrl          String? @db.Text
+  notes           String?
+  pdfUrl          String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -464,7 +464,7 @@ model Return {
   supplierId        String?
   totalRefundAmount Float        @default(0.0)
   status            String       @default("COMPLETED")
-  notes             String? @db.Text
+  notes             String?
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 
@@ -509,7 +509,7 @@ model Payment {
   method          String   @default("CASH") // CASH, UPI, CARD, BANK_TRANSFER, CREDIT, OTHER
   referenceNumber String?
   status          String   @default("COMPLETED") // COMPLETED, CANCELLED
-  notes           String? @db.Text
+  notes           String?
   recordedByUserId String?
   idempotencyKey  String?  @unique
   createdAt       DateTime @default(now())
@@ -532,10 +532,10 @@ model AuditLog {
   action     String   // e.g. 'PRODUCT_CREATED', 'SALE_COMPLETED', 'STOCK_ADJUSTED'
   entity     String   // 'Product', 'Sale', 'Purchase', 'Payment', 'Setting'
   entityId   String?
-  oldValue   String? @db.Text  // JSON string
-  newValue   String? @db.Text  // JSON string
+  oldValue   String?  // JSON string
+  newValue   String?  // JSON string
   ipAddress  String?
-  userAgent  String? @db.Text
+  userAgent  String?
   createdAt  DateTime @default(now())
 
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -551,8 +551,8 @@ model Notification {
   userId     String?
   type       String   // 'LOW_STOCK', 'OUT_OF_STOCK', 'PAYMENT_RECEIVED', 'PURCHASE_COMPLETED'
   title      String
-  message    String @db.Text
-  linkUrl    String? @db.Text
+  message    String
+  linkUrl    String?
   isRead     Boolean  @default(false)
   createdAt  DateTime @default(now())
 
@@ -567,7 +567,7 @@ model TenantSetting {
   id         String   @id @default(uuid())
   businessId String
   key        String
-  value      String @db.Text
+  value      String
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 

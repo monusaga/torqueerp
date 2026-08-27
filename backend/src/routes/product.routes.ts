@@ -100,7 +100,7 @@ router.get('/', authenticateJwt, requireTenant, async (req: Request, res: Respon
 // GET /api/v1/products/lookup/:code - Fast scanner lookup by barcode, part number or SKU
 router.get('/lookup/:code', authenticateJwt, requireTenant, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const code = req.params.code.trim();
+    const code = String(req.params.code).trim();
 
     const product = await prisma.product.findFirst({
       where: {
@@ -326,7 +326,7 @@ router.get('/:id', authenticateJwt, requireTenant, async (req: Request, res: Res
   try {
     const product = await prisma.product.findFirst({
       where: {
-        id: req.params.id,
+        id: String(req.params.id),
         businessId: req.business!.id,
       },
       include: {
@@ -355,7 +355,7 @@ router.put('/:id', authenticateJwt, requireTenant, async (req: Request, res: Res
 
     const existing = await prisma.product.findFirst({
       where: {
-        id: req.params.id,
+        id: String(req.params.id),
         businessId: req.business!.id,
       },
     });

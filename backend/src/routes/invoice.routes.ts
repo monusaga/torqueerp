@@ -56,7 +56,7 @@ router.get('/:id', authenticateJwt, requireTenant, async (req: Request, res: Res
   try {
     const invoice = await prisma.invoice.findFirst({
       where: {
-        id: req.params.id,
+        id: String(req.params.id),
         businessId: req.business!.id,
       },
       include: {
@@ -87,7 +87,7 @@ router.get('/:id/pdf', authenticateJwt, requireTenant, async (req: Request, res:
 
     const invoice = await prisma.invoice.findFirst({
       where: {
-        id: req.params.id,
+        id: String(req.params.id),
         businessId: req.business!.id,
       },
       include: {

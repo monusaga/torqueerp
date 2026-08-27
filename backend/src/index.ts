@@ -30,9 +30,33 @@ app.use('/downloads', express.static(path.join(process.cwd(), 'public', 'downloa
 
 // Security & Middlewares
 app.use(helmet());
+
+// CORS: development stays permissive; production requires an explicit
+// CORS_ORIGIN (single origin or comma-separated allowlist). Requests without
+// an Origin header (native mobile apps like the Android client, curl,
+// server-to-server) are never blocked by CORS — the browser-only Origin
+// check simply does not apply to them.
+const corsAllowlist = (process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((o) => o.trim().replace(/\/$/, ''))
+  .filter(Boolean);
+
+const corsOrigin =
+  corsAllowlist.length > 0
+    ? corsAllowlist
+    : process.env.NODE_ENV === 'production'
+      ? [] // production without CORS_ORIGIN: no browser origin is allowed
+      : '*'; // development default
+
+if (process.env.NODE_ENV === 'production' && corsAllowlist.length === 0) {
+  console.warn(
+    '[CORS] NODE_ENV=production but CORS_ORIGIN is not set — browser requests will be blocked. Set CORS_ORIGIN to your web origin.'
+  );
+}
+
 app.use(
   cors({
-    origin: '*', // Configurable in production
+    origin: corsOrigin,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-business-id'],
   })

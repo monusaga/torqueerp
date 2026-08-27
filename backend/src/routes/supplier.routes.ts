@@ -74,7 +74,7 @@ router.get('/:id', authenticateJwt, requireTenant, async (req: Request, res: Res
   try {
     const supplier = await prisma.supplier.findFirst({
       where: {
-        id: req.params.id,
+        id: String(req.params.id),
         businessId: req.business!.id,
       },
       include: {

@@ -4,14 +4,16 @@
   "description": "Unified REST API & Business Logic Engine for Spare Parts ERP SaaS",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "prisma generate --schema prisma/schema.sqlite.prisma && tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
-    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev --schema prisma/schema.sqlite.prisma",
+    "db:push": "prisma db push --schema prisma/schema.sqlite.prisma",
     "db:seed": "tsx prisma/seed.ts",
-    "test": "vitest run"
+    "test": "prisma generate --schema prisma/schema.sqlite.prisma && vitest run",
+    "db:generate:dev": "prisma generate --schema prisma/schema.sqlite.prisma",
+    "db:push:prod": "prisma db push"
   },
   "dependencies": {
     "@prisma/client": "^6.4.1",
@@ -45,5 +47,8 @@
     "tsx": "^4.19.3",
     "typescript": "^5.7.3",
     "vitest": "^3.0.6"
+  },
+  "engines": {
+    "node": ">=18.18"
   }
 }

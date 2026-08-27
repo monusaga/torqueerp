@@ -27,7 +27,7 @@ router.get('/', authenticateJwt, requireTenant, async (req: Request, res: Respon
 router.put('/:id/read', authenticateJwt, requireTenant, async (req: Request, res: Response, next: NextFunction) => {
   try {
     await prisma.notification.updateMany({
-      where: { id: req.params.id, businessId: req.business!.id },
+      where: { id: String(req.params.id), businessId: req.business!.id },
       data: { isRead: true },
     });
 
