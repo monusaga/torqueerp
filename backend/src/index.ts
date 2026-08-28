@@ -25,6 +25,22 @@ import downloadRoutes from './routes/download.routes.js';
 
 const app = express();
 
+// Reverse-proxy awareness: in production the app runs behind nginx/Hostinger's
+// proxy, which sets X-Forwarded-For. Without this, express-rate-limit sees
+// every request as coming from the proxy's IP — so one noisy client could
+// exhaust the limit for everyone (and it logs ERR_ERL_UNEXPECTED_X_FORWARDED_FOR).
+//
+// A NUMBER (hop count) is used rather than `true`: trusting every hop would let
+// a client spoof X-Forwarded-For and evade rate limiting entirely. Default 1 =
+// exactly one proxy in front. Override with TRUST_PROXY if your stack differs
+// (e.g. Cloudflare + nginx = 2).
+const trustProxyHops = Number.parseInt(process.env.TRUST_PROXY ?? '', 10);
+if (Number.isFinite(trustProxyHops) && trustProxyHops >= 0) {
+  app.set('trust proxy', trustProxyHops);
+} else if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
 // Serve static APK binaries directly
 app.use('/downloads', express.static(path.join(process.cwd(), 'public', 'downloads')));
 
