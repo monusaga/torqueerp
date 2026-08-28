@@ -1,0 +1,69 @@
+name: Deploy to Hostinger
+
+# Runs on every push to main, and can also be triggered by hand from the
+# GitHub UI (Actions -> Deploy to Hostinger -> Run workflow).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: true
+          script: |
+            set -e
+            APP_DIR="${{ secrets.APP_DIR }}"
+            WEB_ROOT="${{ secrets.WEB_ROOT }}"
+            PM2_APP="${{ secrets.PM2_APP_NAME }}"
+
+            echo "==> Pulling latest code"
+            cd "$APP_DIR"
+            git fetch --all
+            git reset --hard origin/main
+
+            echo "==> Building backend"
+            cd "$APP_DIR/backend"
+            npm ci
+            npx prisma generate
+            npm run build
+
+            echo "==> Restarting backend (pm2)"
+            pm2 restart "$PM2_APP" --update-env
+
+            echo "==> Building web"
+            cd "$APP_DIR/web"
+            npm ci
+            npm run build
+
+            echo "==> Publishing web to $WEB_ROOT"
+            cp -r "$APP_DIR/web/dist/." "$WEB_ROOT/"
+
+            echo "==> Deploy complete"
+
+      - name: Verify live deployment
+        run: |
+          sleep 5
+          echo "--- backend Google auth config ---"
+          # 401 INVALID_GOOGLE_TOKEN = configured correctly.
+          # 503 GOOGLE_AUTH_NOT_CONFIGURED = env vars still missing on the server.
+          curl -s -o /tmp/g.json -w "HTTP %{http_code}\n" \
+            -X POST "${{ secrets.SITE_URL }}/api/v1/auth/google" \
+            -H "Content-Type: application/json" \
+            -d '{"credential":"probe.invalid"}' || true
+          cat /tmp/g.json || true
+          echo
+          echo "--- served web bundle ---"
+          curl -s "${{ secrets.SITE_URL }}/" | grep -oE 'assets/index-[A-Za-z0-9_-]+\.js' | head -1 || true
