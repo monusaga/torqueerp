@@ -26,6 +26,7 @@ import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.exceptions.NoCredentialException
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.torqueerp.app.R
 import com.torqueerp.app.data.api.ApiService
@@ -118,16 +119,36 @@ fun LoginScreen(
         scope.launch {
             try {
                 val credentialManager = CredentialManager.create(context)
-                val googleIdOption = GetGoogleIdOption.Builder()
-                    .setServerClientId(context.getString(R.string.default_web_client_id))
-                    .setFilterByAuthorizedAccounts(false)
-                    .setAutoSelectEnabled(false)
-                    .build()
-                val request = GetCredentialRequest.Builder()
-                    .addCredentialOption(googleIdOption)
-                    .build()
+                val serverClientId = context.getString(R.string.default_web_client_id)
 
-                val result = credentialManager.getCredential(context, request)
+                // Explicit "Sign in with Google" button flow: this option always
+                // shows the full account picker. GetGoogleIdOption (the one-tap
+                // API) is used only as a fast path — Play services suppresses it
+                // after repeated dismissals and then reports NoCredentialException
+                // even when the device does have Google accounts.
+                val result = try {
+                    credentialManager.getCredential(
+                        context,
+                        GetCredentialRequest.Builder()
+                            .addCredentialOption(
+                                GetGoogleIdOption.Builder()
+                                    .setServerClientId(serverClientId)
+                                    .setFilterByAuthorizedAccounts(false)
+                                    .setAutoSelectEnabled(false)
+                                    .build()
+                            )
+                            .build()
+                    )
+                } catch (e: NoCredentialException) {
+                    credentialManager.getCredential(
+                        context,
+                        GetCredentialRequest.Builder()
+                            .addCredentialOption(
+                                GetSignInWithGoogleOption.Builder(serverClientId).build()
+                            )
+                            .build()
+                    )
+                }
                 val cred = result.credential
                 if (cred is CustomCredential &&
                     cred.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
@@ -141,7 +162,7 @@ fun LoginScreen(
             } catch (e: GetCredentialCancellationException) {
                 // User dismissed the Google account chooser — not an error.
             } catch (e: NoCredentialException) {
-                errorMessage = "No Google account is available on this device. Add one in Android Settings and retry."
+                errorMessage = "Google sign-in is unavailable right now. Check that a Google account is added in Android Settings, then retry."
             } catch (e: GetCredentialException) {
                 errorMessage = "Google sign-in failed: ${e.message ?: e.type}"
             } catch (e: HttpException) {

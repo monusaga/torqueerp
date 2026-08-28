@@ -14,7 +14,7 @@ const APK_METADATA = {
   fileSizeMb: '71.4 MB',
   packageId: 'com.torqueerp.app',
   fileName: 'MonuSagar-v1.3.0.apk',
-  sha256: '0c49ee7f985e4216e0679867f1e1036a1f0d6620da0c20d23e3f34fd6f6b7ac5',
+  sha256: '64c6ae52ab20685ff10da483afc18496074c760bd22dbb4ad7222c10eb12bfde',
 };
 
 // GET /api/v1/downloads/android/info - Version metadata

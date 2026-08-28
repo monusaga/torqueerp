@@ -47,7 +47,7 @@ export const DownloadAppPage: React.FC = () => {
     targetAndroid: 'Android 15 (API 35/36)',
     releaseDate: 'August 2026',
     packageId: 'com.torqueerp.app',
-    sha256: '0c49ee7f985e4216e0679867f1e1036a1f0d6620da0c20d23e3f34fd6f6b7ac5',
+    sha256: '64c6ae52ab20685ff10da483afc18496074c760bd22dbb4ad7222c10eb12bfde',
   };
 
   // Primary download is the static file: it is bundled with the web app itself,
