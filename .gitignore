@@ -82,3 +82,7 @@ web/public/downloads/*.apk
 # Local AI tooling
 .agents/
 .claude/
+
+# The web production env is committed intentionally — it contains only the
+# public Google OAuth web client id (see the file header). No secrets.
+!web/.env.production

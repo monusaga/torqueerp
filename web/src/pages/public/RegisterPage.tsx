@@ -55,7 +55,7 @@ export const RegisterPage: React.FC = () => {
             <Gauge className="w-6 h-6 text-white" />
           </div>
           <span className="font-black text-2xl tracking-tight text-white">
-            Torque<span className="text-emerald-400">SAGAR</span>
+            Monu<span className="text-emerald-400">Sagar</span>
           </span>
         </Link>
         <h2 className="mt-6 text-2xl font-bold text-white tracking-tight">
