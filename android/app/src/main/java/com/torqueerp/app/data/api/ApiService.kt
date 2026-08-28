@@ -149,7 +149,11 @@ interface ApiService {
     companion object {
         var customBaseUrl: String? = null
         // Default local loopback / LAN fallback
-        const val DEFAULT_BASE_URL = "http://10.0.2.2:4000/api/v1/"
+        // Production server by default, so a fresh install works out of the box.
+        // Override at runtime from the login screen ("Configure API Server Host")
+        // for local development, e.g. http://10.0.2.2:4000/api/v1/ (emulator) or
+        // http://127.0.0.1:4000/api/v1/ with `adb reverse tcp:4000 tcp:4000`.
+        const val DEFAULT_BASE_URL = "https://erp.monusagar.in/api/v1/"
 
         fun getBaseUrl(): String = customBaseUrl ?: DEFAULT_BASE_URL
 
