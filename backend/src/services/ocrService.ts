@@ -30,16 +30,38 @@ export function normalizeCode(value: string | null | undefined): string {
   return value.toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
-// Lines that are label boilerplate, never a part name.
+// Lines that are label boilerplate, never a part name. OCR frequently garbles
+// these (e.g. "(INCL. OF ALL TAXES)" -> "(Inncl Of All Takese"), so the
+// patterns stay deliberately loose: parenthetical lines, "of all", and
+// misspelling-tolerant tax/incl stems are all rejected.
 const NAME_BLACKLIST =
-  /REGD|OFFICE|DISTRICT|COUNTRY|ORIGIN|MFD|MFG|NET\s*QTY|CUSTOMER|CODE|TAXES|INCL|WWW\.|\bLTD\b|\bPVT\b|BATCH|DATE|MADE\s+IN|WARRANTY|HELPLINE|EMAIL|PHONE|ADDRESS|FLOOR|WALK|CENTRE|CENTER|GST|CIN\b/i;
+  /^\s*\(|REGD|OFFICE|DISTRICT|COUNTRY|ORIGIN|MFD|MFG|NET\s*QTY|CUSTOMER|CODE|TAX|TAKES|TAXE|IN+CL|OF\s+ALL|M\.?R\.?P|RETAIL|PRICE|WWW\.|\bLTD\b|\bPVT\b|BATCH|DATE|MADE\s+IN|WARRANTY|HELPLINE|EMAIL|PHONE|ADDRESS|FLOOR|WALK|CENTRE|CENTER|GST|CIN\b/i;
 
+// Multi-brand support: OEMs, component makers and consumables. Any Indian
+// spare-part label the counter receives should resolve to a brand here.
+// Matching walks BRANDS_BY_SPECIFICITY (longest first) so "UNO MINDA" wins
+// over "MINDA" and "HERO MOTOCORP" over "HERO", whatever the array order.
 const KNOWN_BRANDS = [
-  'ROYAL ENFIELD', 'HERO', 'HONDA', 'BAJAJ', 'TVS', 'YAMAHA', 'SUZUKI', 'KTM',
-  'MARUTI', 'HYUNDAI', 'TATA', 'MAHINDRA', 'TOYOTA',
-  'BOSCH', 'MINDA', 'ENDURANCE', 'GABRIEL', 'LUMAX', 'PRICOL', 'EXIDE',
-  'AMARON', 'CASTROL', 'MOTUL', 'NGK', 'MRF', 'CEAT',
+  // Two-wheeler OEMs
+  'ROYAL ENFIELD', 'HERO MOTOCORP', 'HONDA MOTORCYCLE', 'BAJAJ AUTO',
+  'TVS MOTOR', 'YAMAHA MOTOR', 'SUZUKI MOTORCYCLE', 'HERO HONDA',
+  'HERO', 'HONDA', 'BAJAJ', 'TVS', 'YAMAHA', 'SUZUKI', 'KTM', 'HUSQVARNA',
+  'JAWA', 'YEZDI', 'OLA ELECTRIC', 'ATHER', 'MAHINDRA TWO WHEELER',
+  // Four-wheeler OEMs
+  'MARUTI SUZUKI', 'MARUTI', 'HYUNDAI', 'TATA MOTORS', 'TATA', 'MAHINDRA',
+  'TOYOTA', 'KIA', 'RENAULT', 'NISSAN', 'SKODA', 'VOLKSWAGEN', 'FORD',
+  'ASHOK LEYLAND', 'EICHER', 'FORCE MOTORS', 'ISUZU', 'MG MOTOR',
+  // Component & aftermarket makers
+  'BOSCH', 'MINDA', 'UNO MINDA', 'ENDURANCE', 'GABRIEL', 'LUMAX', 'PRICOL',
+  'EXIDE', 'AMARON', 'LIVGUARD', 'SETCO', 'RANE', 'SUNDARAM', 'WABCO',
+  'VARROC', 'SPARK MINDA', 'SUBROS', 'MOTHERSON', 'TALBROS', 'JTEKT',
+  'FIEM', 'ROLON', 'DID', 'NGK', 'BOSCH INDIA', 'DENSO', 'DELPHI',
+  // Tyres, oils & consumables
+  'MRF', 'CEAT', 'APOLLO', 'JK TYRE', 'TVS EUROGRIP', 'MICHELIN', 'PIRELLI',
+  'CASTROL', 'MOTUL', 'SHELL', 'VALVOLINE', 'GULF', 'SERVO', 'ELF',
 ];
+
+const BRANDS_BY_SPECIFICITY = [...KNOWN_BRANDS].sort((a, b) => b.length - a.length);
 
 export class LocalOCRService implements OCRProvider {
   /**
@@ -62,6 +84,12 @@ export class LocalOCRService implements OCRProvider {
   parseExtractedText(text: string): ExtractedProductData {
     const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
+    // Price patterns are declared up front because part-number detection also
+    // needs them, to avoid mistaking an amount for an identifier.
+    const labeledMrp =
+      /(?:M\.?\s*R\.?\s*P\.?|MAX(?:IMUM)?\s*RETAIL\s*PRICE|RETAIL\s*PRICE)\s*[:.\-]?\s*(?:₹|RS\.?|INR)?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i;
+    const genericPrice = /(?:PRICE|RS\.?|₹|INR)\s*[:.\-]?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i;
+
     // ------------------------------------------------------------------
     // 1. Part Number — prioritized: an explicit label always beats a guess.
     //    Handles: PART NO 580387/F | PART NO:580387/F | PART NUMBER 580387/F
@@ -72,8 +100,11 @@ export class LocalOCRService implements OCRProvider {
     let partNoConfidence = 0;
     let partNoLineIdx = -1;
 
+    // Multi-brand label keywords. Different OEMs print the identifier
+    // differently: Royal Enfield "PART NO", Honda/Hero "PART NUMBER",
+    // Bajaj "PART CODE", TVS "MATERIAL"/"MAT NO", others "REF"/"CAT"/"ARTICLE".
     const labeledPartNo =
-      /(?:PART\s*(?:NO|NUMBER|#)\.?|P\s*[/.]\s*N(?:O)?\.?|ITEM\s*(?:NO|#)\.?|SKU)\s*[:.\-]?\s*([A-Z0-9][A-Z0-9 /\-.]{2,})/i;
+      /(?:PART\s*(?:NO|NUMBER|CODE|#)\.?|P\s*[/.]?\s*N(?:O)?\.?|PT\s*NO\.?|ITEM\s*(?:NO|CODE|#)\.?|SKU|MATERIAL(?:\s*(?:NO|CODE))?\.?|MAT\s*NO\.?|REF(?:\s*NO)?\.?|CAT(?:\s*NO)?\.?|ARTICLE(?:\s*NO)?\.?)\s*[:.\-]?\s*([A-Z0-9][A-Z0-9 /\-.]{2,})/i;
 
     for (let i = 0; i < lines.length; i++) {
       const match = lines[i].match(labeledPartNo);
@@ -89,17 +120,37 @@ export class LocalOCRService implements OCRProvider {
       }
     }
 
-    // Fallback: a standalone token that LOOKS like a part number (digits + suffix
-    // letter separated by / or -, e.g. 580387/F, RAH00140/B, 145214-C).
+    // Fallback: a standalone token shaped like an OEM part number. Ordered
+    // most-specific first so a Honda/Hero triplet is never truncated into a
+    // shorter pattern. Covers the common Indian OEM formats:
+    //   Honda / Hero      12345-KWW-900, 91201-KTY-003
+    //   Royal Enfield     580387/F, RAH00140/B, 145214-C
+    //   Bajaj / TVS       JD11801, DT9034, A1234567
+    //   KTM / Suzuki      90113001000, 09103-06301
     if (!detectedPartNo) {
-      const bareCandidate = /\b([A-Z]{0,4}\d{4,}\s*[/-]\s*[A-Z0-9]{1,3})\b/;
-      for (let i = 0; i < lines.length; i++) {
-        const match = lines[i].match(bareCandidate);
-        if (match && match[1]) {
-          detectedPartNo = match[1].toUpperCase().replace(/\s*([/-])\s*/g, '$1');
-          partNoConfidence = 70;
-          partNoLineIdx = i;
-          break;
+      const bareCandidates: Array<{ re: RegExp; confidence: number }> = [
+        // Hyphenated triplet (Honda, Hero, Suzuki 4W)
+        { re: /\b(\d{4,5}-[A-Z0-9]{2,4}-[A-Z0-9]{2,4})\b/, confidence: 78 },
+        // Digits + separator + short suffix (Royal Enfield style)
+        { re: /\b([A-Z]{0,4}\d{4,}\s*[/-]\s*[A-Z0-9]{1,3})\b/, confidence: 72 },
+        // Letters followed by digits (Bajaj / TVS style)
+        { re: /\b([A-Z]{1,4}\d{5,9})\b/, confidence: 62 },
+        // Long bare numeric code, but not a scanner serial (12+ digits)
+        { re: /\b(\d{6,11})\b/, confidence: 55 },
+      ];
+
+      outer: for (const { re, confidence } of bareCandidates) {
+        for (let i = 0; i < lines.length; i++) {
+          // Never mistake a price, a date or a long serial for a part number.
+          if (labeledMrp.test(lines[i]) || /\b\d{12,}\b/.test(lines[i])) continue;
+          if (/\b\d{2}[/-]\d{2,4}\b/.test(lines[i])) continue; // MFD 04/2023
+          const match = lines[i].match(re);
+          if (match && match[1]) {
+            detectedPartNo = match[1].toUpperCase().replace(/\s*([/-])\s*/g, '$1');
+            partNoConfidence = confidence;
+            partNoLineIdx = i;
+            break outer;
+          }
         }
       }
     }
@@ -112,29 +163,48 @@ export class LocalOCRService implements OCRProvider {
     let detectedMrp: number | null = null;
     let mrpConfidence = 0;
 
-    const labeledMrp =
-      /(?:M\.?\s*R\.?\s*P\.?|MAX(?:IMUM)?\s*RETAIL\s*PRICE|RETAIL\s*PRICE)\s*[:.\-]?\s*(?:₹|RS\.?|INR)?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i;
-    const genericPrice = /(?:PRICE|RS\.?|₹|INR)\s*[:.\-]?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i;
-
-    for (const line of lines) {
-      const match = line.match(labeledMrp);
-      if (match && match[1]) {
-        const val = parseFloat(match[1].replace(/,/g, ''));
-        if (!isNaN(val) && val > 0) {
-          detectedMrp = val;
-          mrpConfidence = 95;
-          break;
-        }
-      }
-    }
-    if (detectedMrp === null) {
+    // A price that was read cleanly keeps its paise. When OCR drops the
+    // decimal, "MRP Rs. 350.00" becomes "Rs. 35000" — a hundred times the real
+    // price, which is far more damaging than no price at all. So an amount
+    // carrying paise always wins, and a bare integer is accepted only when the
+    // label offers nothing better, at a confidence low enough to be flagged.
+    const hasPaise = (raw: string) => /\.\d{1,2}$/.test(raw.trim());
+    const pickPrice = (
+      pattern: RegExp,
+      paiseConfidence: number,
+      integerConfidence: number
+    ): { value: number; confidence: number } | null => {
+      let bareInteger: { value: number; confidence: number } | null = null;
       for (const line of lines) {
-        const match = line.match(genericPrice);
+        const match = line.match(pattern);
+        if (!match || !match[1]) continue;
+        const val = parseFloat(match[1].replace(/,/g, ''));
+        if (isNaN(val) || val <= 0) continue;
+        if (hasPaise(match[1])) return { value: val, confidence: paiseConfidence };
+        if (!bareInteger) bareInteger = { value: val, confidence: integerConfidence };
+      }
+      return bareInteger;
+    };
+
+    const pricedMrp = pickPrice(labeledMrp, 95, 60) ?? pickPrice(genericPrice, 70, 45);
+    if (pricedMrp) {
+      detectedMrp = pricedMrp.value;
+      mrpConfidence = pricedMrp.confidence;
+    }
+    // Last resort: a bare decimal amount such as "240.00" on its own line.
+    // OCR often mangles the "MRP"/"Rs." prefix beyond matching, but the
+    // two-decimal price itself survives. Low confidence -> flagged for review.
+    if (detectedMrp === null) {
+      const bareAmount = /(?:^|\s)([0-9][0-9,]*\.[0-9]{2})(?:\s|$)/;
+      for (const line of lines) {
+        // Skip lines that are clearly identifiers rather than money.
+        if (labeledPartNo.test(line) || /\b\d{8,}\b/.test(line)) continue;
+        const match = line.match(bareAmount);
         if (match && match[1]) {
           const val = parseFloat(match[1].replace(/,/g, ''));
           if (!isNaN(val) && val > 0) {
             detectedMrp = val;
-            mrpConfidence = 70;
+            mrpConfidence = 55;
             break;
           }
         }
@@ -148,7 +218,7 @@ export class LocalOCRService implements OCRProvider {
     let mfgConfidence = 0;
     for (const line of lines) {
       const upper = line.toUpperCase();
-      const found = KNOWN_BRANDS.find(b => upper.includes(b));
+      const found = BRANDS_BY_SPECIFICITY.find(b => upper.includes(b));
       if (found) {
         detectedMfg = found;
         mfgConfidence = 90;

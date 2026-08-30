@@ -2,11 +2,16 @@ package com.torqueerp.app.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.util.Size
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
@@ -37,10 +42,80 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.torqueerp.app.data.api.ApiService
 import com.torqueerp.app.data.model.*
 import com.torqueerp.app.ui.theme.*
+import com.google.android.gms.tasks.Task
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+
+/**
+ * A frame worth sending to the identifier: one where the OCR text contains an
+ * OEM part-number field, not just whatever else was in shot.
+ */
+private val PART_LABEL_HINT = Regex(
+    """PART\s*(NO|NUMBER|CODE)|\bP\s*/?\s*N\b|PT\s*NO|MATERIAL|MAT\s*NO""",
+    RegexOption.IGNORE_CASE
+)
+
+/**
+ * A cleanly-read price: rupees and paise. Deliberately strict — a frame that
+ * only shows a price *label* is not good enough. On a soft frame ML Kit reads
+ * "MRP Rs. 350.00" as "VRP Rs. 35000", and accepting that made the scanner
+ * report a hundred-times-wrong price. Waiting for the decimal is what
+ * distinguishes a usable read from a damaged one.
+ */
+private val PRICE_HINT = Regex("""\d+\.\d{2}""")
+
+/**
+ * Samples the live OCR stream and merges the distinct lines every frame
+ * contributes.
+ *
+ * A single frame usually has part of the label sharp and part of it blurred, so
+ * using one frame's text drops whichever field happened to be soft — the cause
+ * of half-filled scan results. Merging across frames lets the part number come
+ * from one frame and the MRP from another. Sampling stops as soon as the merged
+ * text carries both, and otherwise runs for the full window.
+ */
+private suspend fun collectLabelText(
+    read: () -> String,
+    windowMs: Long = 6000,
+    stepMs: Long = 200
+): String {
+    val lines = LinkedHashSet<String>()
+    var lastFrame = ""
+    var waited = 0L
+    while (waited < windowMs) {
+        val current = read()
+        if (current.isNotBlank() && current != lastFrame) {
+            lastFrame = current
+            current.lineSequence()
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .forEach { lines.add(it) }
+
+            val merged = lines.joinToString("\n")
+            if (PART_LABEL_HINT.containsMatchIn(merged) && PRICE_HINT.containsMatchIn(merged)) {
+                return merged
+            }
+        }
+        delay(stepMs)
+        waited += stepMs
+    }
+    return lines.joinToString("\n")
+}
+
+/**
+ * Awaits a Play-services Task from a coroutine without pulling in the
+ * kotlinx-coroutines-play-services artifact.
+ */
+private suspend fun <T> Task<T>.awaitResult(): T = suspendCancellableCoroutine { cont ->
+    addOnSuccessListener { result -> if (cont.isActive) cont.resume(result) }
+    addOnFailureListener { error -> if (cont.isActive) cont.resumeWithException(error) }
+    addOnCanceledListener { cont.cancel() }
+}
 
 /**
  * Smart spare-parts scanner:
@@ -91,6 +166,14 @@ fun CameraScanScreen(
     var ambiguousCandidates by remember { mutableStateOf<List<Product>?>(null) }
     var isProcessingOcr by remember { mutableStateOf(false) }
     var ocrResult by remember { mutableStateOf<ExtractedOCRData?>(null) }
+    // Manual entry opens the same product form with blank fields.
+    var manualEntry by remember { mutableStateOf(false) }
+    // Set when the backend read a price it is not confident about — typically a
+    // label whose decimal point was lost. The prefilled MRP is then shown with
+    // a warning instead of looking like a verified value.
+    var mrpNeedsReview by remember { mutableStateOf(false) }
+    // Read by the camera analyzer, which outlives any single recomposition.
+    val manualEntryState = rememberUpdatedState(manualEntry)
 
     // Debounce: process one code at a time; ignore repeats of the same code
     // for a cooldown window so 30fps camera frames trigger exactly one scan.
@@ -101,6 +184,9 @@ fun CameraScanScreen(
     val scope = rememberCoroutineScope()
 
     fun handleDetectedCode(code: String) {
+        // While the user is typing a part in by hand, a code drifting through
+        // the viewfinder must not overwrite what they have entered.
+        if (manualEntryState.value) return
         val now = System.currentTimeMillis()
         if (code == lastCode && now - lastCodeAt < 4000) return
         if (!busy.compareAndSet(false, true)) return
@@ -123,13 +209,13 @@ fun CameraScanScreen(
                 }
 
                 // STEP 2: automatic OCR fallback on the same label.
+                // Taking the first non-blank frame reads whatever happened to be
+                // sharp at that instant — often the surroundings rather than the
+                // label, which produced an empty part number and a name lifted
+                // from background text. Keep sampling until a frame actually
+                // shows a part-number field, and otherwise keep the richest read.
                 statusMessage = "Reading part label…"
-                var waited = 0L
-                while (latestOcrText.isBlank() && waited < 3000) {
-                    delay(300)
-                    waited += 300
-                }
-                val ocrText = latestOcrText
+                val ocrText = collectLabelText(read = { latestOcrText })
 
                 val res = apiService.identifyScan(IdentifyScanRequest(barcode = code, ocrText = ocrText.ifBlank { null }))
                 when (res.status) {
@@ -145,7 +231,12 @@ fun CameraScanScreen(
                     }
                     "NEW_PRODUCT" -> {
                         statusMessage = "🆕 New part detected"
+                        // A scan arriving while the manual form is open replaces
+                        // its contents, so the dialog must stop calling itself
+                        // "manual" and show the scanned code it prefilled from.
+                        manualEntry = false
                         newProductScannedCode = code
+                        mrpNeedsReview = res.extracted?.mrp?.needsReview == true
                         newProductSuggestion = res.suggested
                     }
                     else -> {
@@ -161,6 +252,75 @@ fun CameraScanScreen(
                 busy.set(false)
             }
         }
+    }
+
+    // Gallery import: run the same barcode -> OCR -> identify pipeline on a
+    // saved photo, so a label photographed earlier (or sent by a supplier)
+    // can be added without re-scanning the physical part.
+    fun processGalleryImage(uri: Uri) {
+        isIdentifying = true
+        statusMessage = "Reading photo…"
+        scope.launch {
+            try {
+                val image = InputImage.fromFilePath(context, uri)
+
+                val barcodeValue = try {
+                    val barcodes = BarcodeScanning.getClient().process(image).awaitResult()
+                    barcodes.firstOrNull()?.rawValue
+                } catch (e: Exception) {
+                    null
+                }
+
+                val text = try {
+                    TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                        .process(image).awaitResult().text
+                } catch (e: Exception) {
+                    ""
+                }
+
+                if (barcodeValue == null && text.isBlank()) {
+                    statusMessage = "Couldn't read anything from that photo. Try a sharper, closer shot of the label."
+                    return@launch
+                }
+
+                latestOcrText = text
+                val res = apiService.identifyScan(
+                    IdentifyScanRequest(barcode = barcodeValue, ocrText = text.ifBlank { null })
+                )
+                when (res.status) {
+                    "MATCHED_PRODUCT" -> {
+                        if (res.product != null) {
+                            statusMessage = "✅ Product found: ${res.product.name}"
+                            onProductIdentified(res.product)
+                        }
+                    }
+                    "AMBIGUOUS_MATCH" -> {
+                        statusMessage = "Multiple parts match — please choose."
+                        ambiguousCandidates = res.candidates
+                    }
+                    "NEW_PRODUCT" -> {
+                        statusMessage = "🆕 New part detected from photo"
+                        manualEntry = false
+                        newProductScannedCode = barcodeValue
+                        mrpNeedsReview = res.extracted?.mrp?.needsReview == true
+                        newProductSuggestion = res.suggested
+                    }
+                    else -> {
+                        statusMessage = "Couldn't identify this part from the photo. Add it manually below."
+                    }
+                }
+            } catch (e: Exception) {
+                statusMessage = e.localizedMessage ?: "Could not process that photo."
+            } finally {
+                isIdentifying = false
+            }
+        }
+    }
+
+    val galleryPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) processGalleryImage(uri)
     }
 
     fun processManualOcr() {
@@ -265,23 +425,55 @@ fun CameraScanScreen(
                         }
                     }
                 }
-            } else if (scanMode == 0 && hasCameraPermission && cartBadge != null && cartBadge > 0 && onGoToCart != null) {
-                // Batch selling: running cart count with a direct jump to checkout.
+            } else if (scanMode == 0) {
+                // Alternatives to live scanning: import a saved label photo, or
+                // type the part in by hand. Both end in the same product form.
                 Surface(color = SlateCard, modifier = Modifier.border(1.dp, SlateBorder)) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Button(
-                            onClick = { onGoToCart() },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(50.dp),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
-                        ) {
-                            Text(
-                                "🛒 Go to Cart ($cartBadge item${if (cartBadge == 1) "" else "s"}) ➔",
-                                color = Color.White,
-                                fontWeight = FontWeight.Black
-                            )
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        if (cartBadge != null && cartBadge > 0 && onGoToCart != null) {
+                            Button(
+                                onClick = { onGoToCart() },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(50.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
+                            ) {
+                                Text(
+                                    "🛒 Go to Cart ($cartBadge item${if (cartBadge == 1) "" else "s"}) ➔",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedButton(
+                                onClick = { galleryPicker.launch("image/*") },
+                                enabled = !isIdentifying,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(46.dp),
+                                shape = RoundedCornerShape(13.dp)
+                            ) {
+                                Text("🖼️ Gallery", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextWhite)
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    manualEntry = true
+                                    newProductScannedCode = null
+                                    newProductSuggestion = SuggestedProduct(
+                                        partNumber = null, name = null, mrp = null,
+                                        sellingPrice = null, brand = null, barcode = null
+                                    )
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(46.dp),
+                                shape = RoundedCornerShape(13.dp)
+                            ) {
+                                Text("✏️ Manual Add", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextWhite)
+                            }
                         }
                     }
                 }
@@ -308,8 +500,24 @@ fun CameraScanScreen(
                                 it.setSurfaceProvider(previewView.surfaceProvider)
                             }
 
+                            // CameraX defaults image analysis to 640x480. Part
+                            // numbers and MRP are small print on an OEM label and
+                            // come out garbled or half-read at that size, so ask
+                            // for 1080p and let CameraX pick the nearest higher
+                            // resolution the device actually supports.
+                            val resolutionSelector = ResolutionSelector.Builder()
+                                .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
+                                .setResolutionStrategy(
+                                    ResolutionStrategy(
+                                        Size(1920, 1080),
+                                        ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                                    )
+                                )
+                                .build()
+
                             val imageAnalysis = ImageAnalysis.Builder()
                                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                                .setResolutionSelector(resolutionSelector)
                                 .build()
 
                             imageAnalysis.setAnalyzer(executor) { imageProxy ->
@@ -425,22 +633,36 @@ fun CameraScanScreen(
         fun dismiss() {
             newProductSuggestion = null
             newProductScannedCode = null
+            manualEntry = false
+            mrpNeedsReview = false
             statusMessage = null
         }
 
         AlertDialog(
             onDismissRequest = { dismiss() },
             containerColor = SlateCard,
-            title = { Text("🆕 New Product Detected", color = TextWhite, fontWeight = FontWeight.Black) },
+            title = {
+                Text(
+                    if (manualEntry) "✏️ Add Product Manually" else "🆕 New Product Detected",
+                    color = TextWhite,
+                    fontWeight = FontWeight.Black
+                )
+            },
             text = {
                 Column(
                     modifier = Modifier.verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        "Extracted from the label — review and confirm.",
+                        when {
+                            manualEntry ->
+                                "Type the part number, name and MRP. Brand and selling price are optional."
+                            mrpNeedsReview ->
+                                "⚠️ The price on this label was hard to read — check the MRP before saving."
+                            else -> "Extracted from the label — review and confirm."
+                        },
                         fontSize = 11.sp,
-                        color = AmberGold,
+                        color = if (mrpNeedsReview && !manualEntry) DangerRed else AmberGold,
                         fontWeight = FontWeight.Bold
                     )
                     newProductScannedCode?.let { c ->
@@ -464,13 +686,27 @@ fun CameraScanScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(
                             value = mrp, onValueChange = { mrp = it },
-                            label = { Text("MRP ₹", color = TextMuted, fontSize = 11.sp) },
+                            label = {
+                                Text(
+                                    if (mrpNeedsReview) "MRP ₹ — check!" else "MRP ₹",
+                                    color = if (mrpNeedsReview) DangerRed else TextMuted,
+                                    fontSize = 11.sp
+                                )
+                            },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             modifier = Modifier.weight(1f)
                         )
                         OutlinedTextField(
-                            value = selling, onValueChange = { selling = it },
-                            label = { Text("Selling ₹ *", color = TextMuted, fontSize = 11.sp) },
+                            value = selling,
+                            onValueChange = { selling = it },
+                            label = { Text("Selling ₹", color = TextMuted, fontSize = 11.sp) },
+                            placeholder = {
+                                Text(
+                                    if (mrp.isNotBlank()) "= MRP $mrp" else "optional",
+                                    color = TextMuted,
+                                    fontSize = 11.sp
+                                )
+                            },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             modifier = Modifier.weight(1f)
                         )
@@ -489,10 +725,15 @@ fun CameraScanScreen(
                 Button(
                     enabled = !saving,
                     onClick = {
-                        if (partNo.isBlank() || name.isBlank() || (selling.toDoubleOrNull() ?: 0.0) <= 0.0) {
-                            saveError = "Part number, name and selling price are required."
+                        // Only the identity fields are mandatory. Brand, MRP and
+                        // selling price are optional and can be filled in later
+                        // from the catalog; selling defaults to MRP when blank.
+                        if (partNo.isBlank() || name.isBlank()) {
+                            saveError = "Part number and part name are required."
                             return@Button
                         }
+                        val mrpValue = mrp.toDoubleOrNull() ?: 0.0
+                        val sellingValue = selling.toDoubleOrNull() ?: mrpValue
                         saving = true
                         scope.launch {
                             try {
@@ -507,9 +748,9 @@ fun CameraScanScreen(
                                         barcode = if (isPlainDigits) scanned else sug.barcode?.takeIf { it.matches(Regex("^\\d{8,14}$")) },
                                         qrCode = if (!isPlainDigits) scanned else null,
                                         brand = brand.ifBlank { null },
-                                        mrp = mrp.toDoubleOrNull() ?: 0.0,
+                                        mrp = mrpValue,
                                         purchaseCost = 0.0,
-                                        sellingPrice = selling.toDoubleOrNull() ?: 0.0,
+                                        sellingPrice = sellingValue,
                                         initialStock = qty.toIntOrNull() ?: 1,
                                         minStock = 3
                                     )
@@ -531,7 +772,7 @@ fun CameraScanScreen(
             },
             dismissButton = {
                 TextButton(onClick = { dismiss() }) {
-                    Text("Rescan", color = TextMuted)
+                    Text(if (manualEntry) "Cancel" else "Rescan", color = TextMuted)
                 }
             }
         )

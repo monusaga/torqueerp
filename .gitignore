@@ -77,7 +77,10 @@ Desktop.ini
 coverage/
 .cache/
 skills-lock.json
-web/public/downloads/*.apk
+# The published release build ships in the repo: the deploy pulls from git and
+# cannot build an APK. Only this one copy is tracked — the backend download
+# route falls back to it, so there is no need to store a second 75 MB copy.
+!web/public/downloads/*.apk
 
 # Local AI tooling
 .agents/

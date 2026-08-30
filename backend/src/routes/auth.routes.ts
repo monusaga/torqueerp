@@ -374,41 +374,36 @@ router.delete('/account', authenticateJwt, async (req: Request, res: Response, n
   try {
     const userId = req.user!.id;
 
-    await prisma.$transaction(async (tx) => {
-      // Find owned businesses
-      const memberships = await tx.businessMember.findMany({
-        where: { userId, role: 'OWNER' },
-      });
+    await prisma.$transaction(
+      async (tx) => {
+        const owned = await tx.businessMember.findMany({
+          where: { userId, role: 'OWNER' },
+          select: { businessId: true },
+        });
 
-      for (const m of memberships) {
-        const bizId = m.businessId;
-        await tx.returnItem.deleteMany({ where: { return: { businessId: bizId } } });
-        await tx.return.deleteMany({ where: { businessId: bizId } });
-        await tx.payment.deleteMany({ where: { businessId: bizId } });
-        await tx.saleItem.deleteMany({ where: { sale: { businessId: bizId } } });
-        await tx.sale.deleteMany({ where: { businessId: bizId } });
-        await tx.invoice.deleteMany({ where: { businessId: bizId } });
-        await tx.purchaseItem.deleteMany({ where: { purchase: { businessId: bizId } } });
-        await tx.purchase.deleteMany({ where: { businessId: bizId } });
-        await tx.stockMovement.deleteMany({ where: { businessId: bizId } });
-        await tx.productPriceHistory.deleteMany({ where: { product: { businessId: bizId } } });
-        await tx.product.deleteMany({ where: { businessId: bizId } });
-        await tx.productCategory.deleteMany({ where: { businessId: bizId } });
-        await tx.productBrand.deleteMany({ where: { businessId: bizId } });
-        await tx.customer.deleteMany({ where: { businessId: bizId } });
-        await tx.supplier.deleteMany({ where: { businessId: bizId } });
-        await tx.notification.deleteMany({ where: { businessId: bizId } });
-        await tx.auditLog.deleteMany({ where: { businessId: bizId } });
-        await tx.tenantSetting.deleteMany({ where: { businessId: bizId } });
-        await tx.subscription.deleteMany({ where: { businessId: bizId } });
-        await tx.businessMember.deleteMany({ where: { businessId: bizId } });
-        await tx.business.delete({ where: { id: bizId } });
-      }
+        // Every business-scoped relation in the schema declares
+        // `onDelete: Cascade`, so one delete per business removes its products,
+        // sales, invoices, payments, members and settings in a single statement.
+        // Deleting each table by hand issued 20+ extra round trips per business
+        // and pushed real-shop accounts past the transaction timeout, which
+        // surfaced in the app as "delete does nothing".
+        if (owned.length > 0) {
+          await tx.business.deleteMany({
+            where: { id: { in: owned.map((o) => o.businessId) } },
+          });
+        }
 
-      await tx.businessMember.deleteMany({ where: { userId } });
-      await tx.auditLog.deleteMany({ where: { userId } });
-      await tx.user.delete({ where: { id: userId } });
-    });
+        // Memberships in businesses owned by someone else, plus this user's
+        // audit trail, are removed explicitly: those rows declare
+        // `onDelete: SetNull` and would otherwise survive the account deletion.
+        await tx.businessMember.deleteMany({ where: { userId } });
+        await tx.auditLog.deleteMany({ where: { userId } });
+        await tx.user.delete({ where: { id: userId } });
+      },
+      // Cascading a large catalog is still a single big statement per business;
+      // give it real headroom instead of Prisma's 5s interactive default.
+      { timeout: 30_000, maxWait: 10_000 }
+    );
 
     res.json({ success: true, message: 'Account permanently deleted.' });
   } catch (error) {

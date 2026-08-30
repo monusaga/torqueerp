@@ -399,6 +399,12 @@ fun POSScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(item.product.name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TextWhite)
                             Text(
+                                item.product.partNumber,
+                                fontSize = 10.sp,
+                                color = AmberGold,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
                                 "₹${item.product.sellingPrice} × ${item.quantity} = ₹${String.format("%.2f", item.product.sellingPrice * item.quantity)}",
                                 fontSize = 10.sp,
                                 color = TextMuted
@@ -425,33 +431,12 @@ fun POSScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Payment Method Selector
-            Text("Payment Method", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextMuted)
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf("CASH", "UPI", "CARD", "CREDIT").forEach { m ->
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .background(if (paymentMethod == m) InkButton else SlateCard, RoundedCornerShape(10.dp))
-                            .border(1.dp, if (paymentMethod == m) InkButton else SlateBorder, RoundedCornerShape(10.dp))
-                            .clickable { paymentMethod = m }
-                            .padding(vertical = 8.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            m,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (paymentMethod == m) Color.White else TextMuted
-                        )
-                    }
-                }
-            }
-
             Spacer(modifier = Modifier.height(10.dp))
+
+            // The payment-method selector is intentionally hidden for now; every
+            // sale is recorded as CASH. The state and the field sent to the API
+            // are kept so the selector can be restored without touching the
+            // checkout contract.
 
             // GST Rate + Discount
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -553,7 +538,7 @@ fun POSScreen(
                 ) {
                     Text("TAX INVOICE: ${r.invoiceNumber}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextWhite)
                     Text("Customer: ${r.customerName}", fontSize = 11.sp, color = TextMuted)
-                    Text("Payment: ${r.paymentMethod}", fontSize = 11.sp, color = TextMuted)
+                    // Payment line hidden along with the selector.
                     HorizontalDivider(color = SlateBorder, modifier = Modifier.padding(vertical = 6.dp))
                     r.items.forEach { item ->
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {

@@ -442,23 +442,10 @@ export const POSPage: React.FC = () => {
 
         {/* Professional GST & Tax Breakdown Summary */}
         <div className="border-t-2 border-slate-200 pt-3 space-y-2.5">
-          {/* Payment Method Selector */}
-          <div className="grid grid-cols-4 gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs font-bold">
-            {(['CASH', 'UPI', 'CARD', 'CREDIT'] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setPaymentMethod(m)}
-                className={`py-1.5 rounded-lg transition ${
-                  paymentMethod === m
-                    ? 'bg-slate-900 text-white shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-                }`}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
+          {/* The payment-method selector is intentionally hidden for now; every
+              sale is recorded as CASH. The state and the field sent to the API
+              are kept so the selector can be restored without touching the
+              checkout contract. */}
 
           {/* Tax & Discount Controls */}
           <div className="grid grid-cols-2 gap-2 text-xs">

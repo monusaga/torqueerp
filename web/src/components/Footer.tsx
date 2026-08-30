@@ -44,7 +44,7 @@ export const Footer: React.FC = () => {
               <li>
                 <Link to="/download-app" className="text-amber-400 hover:text-amber-300 font-bold flex items-center space-x-1.5">
                   <Smartphone className="w-3.5 h-3.5" />
-                  <span>Download Android APK (v1.3.0)</span>
+                  <span>Download Android APK (v1.4.0)</span>
                 </Link>
               </li>
               <li className="text-slate-500 text-[11px]">Direct APK Install (Android 8.0+)</li>
@@ -65,10 +65,12 @@ export const Footer: React.FC = () => {
           </div>
         </div>
 
-        <div className="mt-12 pt-8 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-500 space-y-4 sm:space-y-0">
-          <p>© {new Date().getFullYear()} Monu Sagar Systems Inc. All rights reserved.</p>
-          <div className="flex items-center space-x-1">
-            <span>Engineered with precision for the Indian Automotive Industry</span>
+        <div className="mt-12 pt-8 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-500 gap-4">
+          <p>© {new Date().getFullYear()} Monu Sagar. All rights reserved.</p>
+          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+            <Link to="/support" className="hover:text-amber-400 transition">Technical Support</Link>
+            <Link to="/terms" className="hover:text-amber-400 transition">Terms &amp; Conditions</Link>
+            <Link to="/privacy" className="hover:text-amber-400 transition">Privacy Policy</Link>
           </div>
         </div>
       </div>

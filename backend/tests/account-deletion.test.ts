@@ -97,4 +97,90 @@ describe('Release-Blocking Permanent Account & Business Deletion Tests', () => {
 
     expect([401, 404]).toContain(testReq.status);
   });
+
+  // Seeding a realistic catalog over HTTP takes longer than Vitest's 5s default,
+  // especially while the rest of the suite is hitting the same database.
+  it('deletes an account that owns a full catalog, cascading every business record', async () => {
+    // A real shop account is not empty. The previous implementation deleted
+    // each table by hand inside one transaction, which is what made deletion
+    // fail once an account had meaningful data.
+    const regEmail = `stocked.owner.${Date.now()}@example.com`;
+    const regRes = await request(app)
+      .post('/api/v1/auth/register')
+      .send({
+        name: 'Stocked Owner',
+        email: regEmail,
+        password: 'Password123!',
+        businessName: `Stocked Spares ${Date.now()}`,
+      });
+
+    const token = regRes.body.token;
+    const userId = regRes.body.user.id;
+    const bizId = regRes.body.activeBusiness.id;
+
+    const productIds: string[] = [];
+    for (let i = 0; i < 25; i++) {
+      const res = await request(app)
+        .post('/api/v1/products')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          name: `Cascade Part ${i}`,
+          partNumber: `CASC-${Date.now()}-${i}`,
+          mrp: 300,
+          purchaseCost: 150,
+          sellingPrice: 280,
+          initialStock: 20,
+          minStock: 2,
+        });
+      productIds.push(res.body.product.id);
+    }
+
+    const invoiceIds: string[] = [];
+    for (const productId of productIds.slice(0, 8)) {
+      const saleRes = await request(app)
+        .post('/api/v1/sales')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          customerName: 'Cascade Buyer',
+          items: [{ productId, quantity: 2, unitPrice: 280 }],
+          amountPaid: 560,
+        });
+      invoiceIds.push(saleRes.body.invoice.id);
+    }
+
+    const delRes = await request(app)
+      .delete('/api/v1/auth/account')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(delRes.status).toBe(200);
+    expect(delRes.body.success).toBe(true);
+
+    // The user, the business and everything hanging off it must be gone.
+    const [userInDb, bizInDb, products, invoices, movements, sales] = await Promise.all([
+      prisma.user.findUnique({ where: { id: userId } }),
+      prisma.business.findUnique({ where: { id: bizId } }),
+      prisma.product.count({ where: { businessId: bizId } }),
+      prisma.invoice.count({ where: { id: { in: invoiceIds } } }),
+      prisma.stockMovement.count({ where: { businessId: bizId } }),
+      prisma.sale.count({ where: { businessId: bizId } }),
+    ]);
+
+    expect(userInDb).toBeNull();
+    expect(bizInDb).toBeNull();
+    expect(products).toBe(0);
+    expect(invoices).toBe(0);
+    expect(movements).toBe(0);
+    expect(sales).toBe(0);
+
+    // And the deleted email is free to register again.
+    const reRegister = await request(app)
+      .post('/api/v1/auth/register')
+      .send({
+        name: 'Stocked Owner',
+        email: regEmail,
+        password: 'Password123!',
+        businessName: 'Second Innings',
+      });
+    expect(reRegister.status).toBe(201);
+  }, 60_000);
 });

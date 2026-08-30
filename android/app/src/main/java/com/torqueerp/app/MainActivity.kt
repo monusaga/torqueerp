@@ -8,8 +8,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import androidx.credentials.ClearCredentialStateRequest
+import androidx.credentials.CredentialManager
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -22,6 +25,7 @@ import com.torqueerp.app.data.model.ExtractedOCRData
 import com.torqueerp.app.data.model.Product
 import com.torqueerp.app.ui.screens.*
 import com.torqueerp.app.ui.theme.*
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -39,6 +43,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             TorqueERPTheme {
                 val navController = rememberNavController()
+                val appContext = LocalContext.current
+                val scope = rememberCoroutineScope()
 
                 var token by remember { mutableStateOf(prefs.getString("auth_token", "") ?: "") }
                 var userEmail by remember { mutableStateOf(prefs.getString("user_email", "") ?: "") }
@@ -120,6 +126,23 @@ class MainActivity : ComponentActivity() {
                     navController.navigate("login") {
                         popUpTo(0) { inclusive = true }
                     }
+                }
+
+                // After the server has permanently deleted the account we also
+                // drop the cached Google credential. Without this, tapping
+                // "Continue with Google" on the login screen can auto-return the
+                // previous token, the server provisions a brand-new account for
+                // that email, and it looks like the deletion never happened.
+                fun clearSessionAfterDeletion() {
+                    scope.launch {
+                        try {
+                            CredentialManager.create(appContext)
+                                .clearCredentialState(ClearCredentialStateRequest())
+                        } catch (_: Exception) {
+                            // Best effort: a stale credential must never block sign-out.
+                        }
+                    }
+                    clearSession()
                 }
 
                 fun updateServerUrl(url: String) {
@@ -360,6 +383,7 @@ class MainActivity : ComponentActivity() {
                                 onBusinessesLoaded = { persistBusinesses(it) },
                                 onSwitchBusiness = { switchBusiness(it) },
                                 onLogout = { clearSession() },
+                                onAccountDeleted = { clearSessionAfterDeletion() },
                                 onNavigateBack = { navController.popBackStack() }
                             )
                         }

@@ -185,7 +185,7 @@ export const LandingPage: React.FC = () => {
             className="bg-slate-950 hover:bg-slate-900 text-white font-black text-xs uppercase tracking-wider px-6 py-3.5 rounded-xl transition flex items-center space-x-2 shadow-xl shadow-slate-950/20 flex-shrink-0"
           >
             <Smartphone className="w-4 h-4 text-amber-400" />
-            <span>Download Android App (v1.3.0)</span>
+            <span>Download Android App (v1.4.0)</span>
           </Link>
         </div>
       </section>

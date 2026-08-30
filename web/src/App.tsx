@@ -8,6 +8,9 @@ import { FeaturesPage } from './pages/public/FeaturesPage';
 import { SparePartsPage } from './pages/public/SparePartsPage';
 import { PricingPage } from './pages/public/PricingPage';
 import { FaqPage } from './pages/public/FaqPage';
+import { TermsPage } from './pages/public/TermsPage';
+import { PrivacyPage } from './pages/public/PrivacyPage';
+import { SupportPage } from './pages/public/SupportPage';
 import { LoginPage } from './pages/public/LoginPage';
 import { RegisterPage } from './pages/public/RegisterPage';
 import { DownloadAppPage } from './pages/public/DownloadAppPage';
@@ -60,8 +63,9 @@ export const App: React.FC = () => {
           <Route path="/garage-management" element={<SparePartsPage />} />
           <Route path="/pricing" element={<PricingPage />} />
           <Route path="/faq" element={<FaqPage />} />
-          <Route path="/privacy" element={<FaqPage />} />
-          <Route path="/terms" element={<FaqPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/terms" element={<TermsPage />} />
+          <Route path="/support" element={<SupportPage />} />
           <Route path="/download-app" element={<DownloadAppPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />

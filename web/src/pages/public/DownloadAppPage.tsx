@@ -26,7 +26,7 @@ export const DownloadAppPage: React.FC = () => {
 
   // Real QR code encoding this site's actual APK URL, so scanning it from a
   // phone downloads directly (the phone must be able to reach this host).
-  const apkUrl = `${window.location.origin}/downloads/MonuSagar-v1.3.0.apk`;
+  const apkUrl = `${window.location.origin}/downloads/MonuSagar-v1.4.0.apk`;
 
   useEffect(() => {
     QRCode.toDataURL(apkUrl, {
@@ -40,14 +40,14 @@ export const DownloadAppPage: React.FC = () => {
 
   const appInfo = {
     name: 'Monu Sagar Android',
-    version: '1.3.0',
+    version: '1.4.0',
     versionCode: 4,
     size: '71.4 MB',
     minAndroid: 'Android 8.0 (Oreo) or higher',
     targetAndroid: 'Android 15 (API 35/36)',
     releaseDate: 'August 2026',
     packageId: 'com.torqueerp.app',
-    sha256: '64c6ae52ab20685ff10da483afc18496074c760bd22dbb4ad7222c10eb12bfde',
+    sha256: '25c206ef12153873fd87c3ac9ebaf49c3f6afc7a36facc0649557676452b44f6',
   };
 
   // Primary download is the static file: it is bundled with the web app itself,
@@ -57,8 +57,8 @@ export const DownloadAppPage: React.FC = () => {
     setDownloadInitiated(true);
     try {
       const link = document.createElement('a');
-      link.href = '/downloads/MonuSagar-v1.3.0.apk';
-      link.setAttribute('download', 'MonuSagar-v1.3.0.apk');
+      link.href = '/downloads/MonuSagar-v1.4.0.apk';
+      link.setAttribute('download', 'MonuSagar-v1.4.0.apk');
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -112,8 +112,8 @@ export const DownloadAppPage: React.FC = () => {
                   </div>
 
                   <a
-                    href="/downloads/MonuSagar-v1.3.0.apk"
-                    download="MonuSagar-v1.3.0.apk"
+                    href="/downloads/MonuSagar-v1.4.0.apk"
+                    download="MonuSagar-v1.4.0.apk"
                     onClick={() => setDownloadInitiated(true)}
                     className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-base py-4 px-6 rounded-xl transition duration-150 flex items-center justify-center space-x-3 shadow-lg shadow-amber-500/25 active:scale-[0.99] cursor-pointer"
                   >
@@ -124,7 +124,7 @@ export const DownloadAppPage: React.FC = () => {
                   {downloadInitiated && (
                     <div className="bg-amber-500/20 border border-amber-500/40 p-3 rounded-lg flex items-center space-x-2 text-xs text-amber-300">
                       <CheckCircle2 className="w-4 h-4 flex-shrink-0 text-amber-400" />
-                      <span>Downloading `MonuSagar-v1.3.0.apk`. Follow the installation steps below!</span>
+                      <span>Downloading `MonuSagar-v1.4.0.apk`. Follow the installation steps below!</span>
                     </div>
                   )}
 
@@ -132,7 +132,7 @@ export const DownloadAppPage: React.FC = () => {
                     Having trouble?{' '}
                     <a
                       href="/api/v1/downloads/android"
-                      download="MonuSagar-v1.3.0.apk"
+                      download="MonuSagar-v1.4.0.apk"
                       className="text-amber-400 hover:text-amber-300 font-bold underline ml-1"
                     >
                       Click here for API Mirror Download Link
@@ -232,7 +232,7 @@ export const DownloadAppPage: React.FC = () => {
                 </div>
                 <h3 className="font-bold text-slate-900 text-base mb-2">Tap Install</h3>
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  Tap the downloaded <code className="text-slate-800 font-mono text-[11px] bg-slate-100 px-1 py-0.5 rounded">MonuSagar-v1.3.0.apk</code> file in your notifications or Downloads folder and tap <strong>Install</strong>.
+                  Tap the downloaded <code className="text-slate-800 font-mono text-[11px] bg-slate-100 px-1 py-0.5 rounded">MonuSagar-v1.4.0.apk</code> file in your notifications or Downloads folder and tap <strong>Install</strong>.
                 </p>
               </div>
 

@@ -6,15 +6,15 @@ const router = Router();
 
 const APK_METADATA = {
   appName: 'Monu Sagar',
-  version: '1.3.0',
-  versionCode: 4,
+  version: '1.4.0',
+  versionCode: 5,
   minAndroidVersion: 'Android 8.0 (Oreo / API Level 26)',
   targetAndroidVersion: 'Android 15 (Vanilla Ice Cream / API Level 35/36)',
-  releaseDate: '2026-08-27',
+  releaseDate: '2026-08-28',
   fileSizeMb: '71.4 MB',
   packageId: 'com.torqueerp.app',
-  fileName: 'MonuSagar-v1.3.0.apk',
-  sha256: '64c6ae52ab20685ff10da483afc18496074c760bd22dbb4ad7222c10eb12bfde',
+  fileName: 'MonuSagar-v1.4.0.apk',
+  sha256: '25c206ef12153873fd87c3ac9ebaf49c3f6afc7a36facc0649557676452b44f6',
 };
 
 // GET /api/v1/downloads/android/info - Version metadata
@@ -30,22 +30,25 @@ router.get('/android', (req: Request, res: Response, next: NextFunction) => {
   try {
     const apkPath = path.resolve(process.cwd(), 'public', 'downloads', APK_METADATA.fileName);
 
-    if (!fs.existsSync(apkPath)) {
-      // Fallback: create empty placeholder or serve from web public if path differs
+    let servePath = apkPath;
+
+    if (!fs.existsSync(servePath)) {
       const altPath = path.resolve(process.cwd(), '..', 'web', 'public', 'downloads', APK_METADATA.fileName);
       if (fs.existsSync(altPath)) {
-        res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-        res.setHeader('Content-Disposition', `attachment; filename="${APK_METADATA.fileName}"`);
-        fs.createReadStream(altPath).pipe(res);
+        servePath = altPath;
+      } else {
+        // This route used to write a 37-byte stub here and stream it with a 200,
+        // so a missing build was handed to users as a "successful" download of a
+        // corrupt file. Report the outage honestly instead.
+        res.status(503).json({
+          error: {
+            code: 'APK_NOT_AVAILABLE',
+            message:
+              'The Android build is not available on this server right now. Please try again later.',
+          },
+        });
         return;
       }
-
-      // If APK not yet assembled, create standard valid binary package file for testing download
-      const downloadsDir = path.resolve(process.cwd(), 'public', 'downloads');
-      if (!fs.existsSync(downloadsDir)) {
-        fs.mkdirSync(downloadsDir, { recursive: true });
-      }
-      fs.writeFileSync(apkPath, Buffer.from('PK\x03\x04MonuSagar-Android-Release-Package'));
     }
 
     res.setHeader('Content-Type', 'application/vnd.android.package-archive');
@@ -53,7 +56,7 @@ router.get('/android', (req: Request, res: Response, next: NextFunction) => {
     res.setHeader('X-App-Version', APK_METADATA.version);
     res.setHeader('X-Package-ID', APK_METADATA.packageId);
 
-    const stream = fs.createReadStream(apkPath);
+    const stream = fs.createReadStream(servePath);
     stream.pipe(res);
   } catch (error) {
     next(error);

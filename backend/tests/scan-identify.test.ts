@@ -114,9 +114,93 @@ describe('OCR field extraction (LocalOCRService)', () => {
     expect(d.partNumber.value).toBe('580387/F');
   });
 
+  it('rejects OCR-garbled tax boilerplate and picks the real part name', () => {
+    // Real capture from the Samsung S22: "(INCL. OF ALL TAXES)" came through
+    // as "(Inncl Of All Takese" and was previously accepted as the part name.
+    const d = svc.parseExtractedText(
+      'PART NO:873150\nCLUTCH PLATE SET\n(Inncl Of All Takese\nMRP Rs. 310.00'
+    );
+    expect(d.partName.value).toBe('Clutch Plate Set');
+  });
+
+  it('returns no part name at all rather than tax boilerplate', () => {
+    const d = svc.parseExtractedText('PART NO:873150\n(Inncl Of All Takese');
+    expect(d.partName.value).toBeNull();
+  });
+
+  it('falls back to a bare decimal amount when the MRP label is unreadable', () => {
+    const d = svc.parseExtractedText('PART NO:873150\nCLUTCH PLATE\n310.00');
+    expect(d.mrp.value).toBe(310);
+    expect(d.mrp.needsReview).toBe(true);
+  });
+
+  it('does not mistake a long serial/barcode for a bare MRP amount', () => {
+    const d = svc.parseExtractedText('6153550H268296281G0213\nPART NO:873150');
+    expect(d.mrp.value).toBeNull();
+  });
+
   it('does not misreport boilerplate as a part number (no bare-first-word guessing)', () => {
     const d = svc.parseExtractedText('ROYAL ENFIELD GENUINE PARTS\nQUALITY ASSURED');
     expect(d.partNumber.value).toBeNull();
+  });
+
+  it('extracts part numbers from every major Indian OEM label format', () => {
+    const labels: Array<[string, string, string]> = [
+      // [brand, raw label text, expected part number]
+      ['Honda', 'HONDA MOTORCYCLE\nPART NUMBER 91201-KTY-003\nOIL SEAL\nMRP Rs. 210.00', '91201-KTY-003'],
+      ['Hero', 'HERO MOTOCORP\nPART NO 12345-KWW-900\nBRAKE SHOE\nMRP 450.00', '12345-KWW-900'],
+      ['Bajaj', 'BAJAJ AUTO LTD\nPART CODE: JD11801\nCLUTCH CABLE\nM.R.P Rs 185.00', 'JD11801'],
+      ['TVS', 'TVS MOTOR COMPANY\nMATERIAL NO A1234567\nAIR FILTER\nMRP: 320.00', 'A1234567'],
+      ['KTM', 'KTM\nPART NO: 90113001000\nCHAIN SLIDER\nMRP Rs. 1,250.00', '90113001000'],
+      ['Royal Enfield', 'ROYAL ENFIELD\nPART NO:580387/F\nTHROTTLE CABLE\nMRP Rs. 240.00', '580387/F'],
+    ];
+    for (const [brand, text, expected] of labels) {
+      const d = svc.parseExtractedText(text);
+      expect(d.partNumber.value, `part number failed for ${brand}`).toBe(expected);
+      expect(d.mrp.value, `MRP failed for ${brand}`).toBeGreaterThan(0);
+    }
+  });
+
+  it('detects the brand across OEMs and component makers', () => {
+    const cases: Array<[string, string]> = [
+      ['BAJAJ AUTO LTD\nPART CODE: JD11801', 'BAJAJ AUTO'],
+      ['TVS MOTOR COMPANY\nMATERIAL NO A1234567', 'TVS MOTOR'],
+      ['HERO MOTOCORP\nPART NO 12345-KWW-900', 'HERO MOTOCORP'],
+      ['KTM\nPART NO: 90113001000', 'KTM'],
+      ['UNO MINDA\nPART NO: MN-4471', 'UNO MINDA'],
+      ['MRF TYRES\nPART NO: 9012', 'MRF'],
+    ];
+    for (const [text, expected] of cases) {
+      expect(svc.parseExtractedText(text).manufacturer.value, `brand failed for ${expected}`).toBe(expected);
+    }
+  });
+
+  it('never mistakes a manufacturing date or long serial for a part number', () => {
+    const d = svc.parseExtractedText('MFD 04/2023\n6153550H268296281G0213\nCLUTCH PLATE');
+    expect(d.partNumber.value).toBeNull();
+  });
+
+  // Captured from the physical S22: on a soft frame ML Kit reads
+  // "MRP Rs. 350.00" as "VRP Rs. 35000" — the M becomes a V and the decimal
+  // point disappears, which used to yield a price 100x the real one.
+  it('prefers a price that kept its paise over one whose decimal OCR dropped', () => {
+    const d = svc.parseExtractedText(
+      'PART NO 888337\nVRP Rs. 35000\nBRAKE SHOE KIT WITH SPRING\nMRP Rs. 350.00'
+    );
+    expect(d.mrp.value).toBe(350);
+    expect(d.mrp.needsReview).toBe(false);
+  });
+
+  it('flags a price for review when no clean decimal amount was read', () => {
+    const d = svc.parseExtractedText('PART NO 888337\nBRAKE SHOE KIT\nVRP Rs. 35000');
+    expect(d.mrp.needsReview).toBe(true);
+    expect(d.mrp.confidence).toBeLessThan(85);
+  });
+
+  it('still reads a genuine whole-rupee MRP, but marks it for review', () => {
+    const d = svc.parseExtractedText('PART NO:12345\nCLUTCH CABLE\nMRP Rs. 450');
+    expect(d.mrp.value).toBe(450);
+    expect(d.mrp.needsReview).toBe(true);
   });
 
   it('normalizeCode treats slash/hyphen/space variants as equal', () => {

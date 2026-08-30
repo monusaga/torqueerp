@@ -41,17 +41,22 @@ fun SettingsScreen(
     onBusinessesLoaded: (List<Business>) -> Unit,
     onSwitchBusiness: (Business) -> Unit,
     onLogout: () -> Unit,
+    onAccountDeleted: () -> Unit,
     onNavigateBack: () -> Unit
 ) {
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var deleteConfirmText by remember { mutableStateOf("") }
+    // Kept separate from statusMessage: that one renders on the screen behind
+    // the dialog, where a failed deletion would be invisible.
+    var deleteError by remember { mutableStateOf<String?>(null) }
+    var deleting by remember { mutableStateOf(false) }
     var showCreateBusiness by remember { mutableStateOf(false) }
     var showServerDialog by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
     var showBusinessProfile by remember { mutableStateOf(false) }
     var showSwitcher by remember { mutableStateOf(false) }
-    var infoDialog by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var infoDoc by remember { mutableStateOf<InfoDoc?>(null) }
 
     // Business profile form state (loaded from GET /businesses/current)
     var profileLoaded by remember { mutableStateOf(false) }
@@ -216,16 +221,20 @@ fun SettingsScreen(
 
             TorqueSectionHeader("Support")
             TorqueGroup {
-                TorqueListRow("❓", "Help & FAQ", onClick = {
-                    infoDialog = "Help & FAQ" to "• SELL: scan a part label — it is identified automatically and added to the cart.\n• PURCHASE: scan labels one after another, enter quantities, then Complete Stock Entry.\n• Unknown parts are read via OCR and prefilled for one-tap creation.\n• Invoices support A4 GST and 80mm thermal PDF sharing."
+                TorqueListRow("❓", "Help & FAQ", "Selling, stock, scanning & invoices", onClick = {
+                    infoDoc = InfoDocs.help
                 })
                 TorqueDivider()
-                TorqueListRow("✉️", "Contact Support", onClick = {
-                    infoDialog = "Contact Support" to "Email: monusagar247@gmail.com\n\nInclude your business name and a short description of the issue."
+                TorqueListRow("✉️", "Technical Support", "Fixes for common problems", onClick = {
+                    infoDoc = InfoDocs.support
                 })
                 TorqueDivider()
-                TorqueListRow("📄", "Terms & Privacy", onClick = {
-                    infoDialog = "Terms & Privacy" to "Your business data belongs to you. It is stored on your configured Monu Sagar server and is never shared with third parties. Export everything anytime from Reports → CSV."
+                TorqueListRow("📄", "Terms & Conditions", onClick = {
+                    infoDoc = InfoDocs.terms
+                })
+                TorqueDivider()
+                TorqueListRow("🔒", "Privacy Policy", onClick = {
+                    infoDoc = InfoDocs.privacy
                 })
             }
 
@@ -429,15 +438,70 @@ fun SettingsScreen(
     }
 
     // ---- Info dialogs (Support section) ----
-    infoDialog?.let { (title, body) ->
+    infoDoc?.let { doc ->
         AlertDialog(
-            onDismissRequest = { infoDialog = null },
+            onDismissRequest = { infoDoc = null },
             containerColor = SlateCard,
             shape = RoundedCornerShape(22.dp),
-            title = { Text(title, color = TextWhite, fontWeight = FontWeight.Black) },
-            text = { Text(body, fontSize = 13.sp, color = TextMuted, lineHeight = 19.sp) },
+            title = { Text(doc.title, color = TextWhite, fontWeight = FontWeight.Black, fontSize = 17.sp) },
+            text = {
+                // These documents are long. Without the scroll the tail of the
+                // text is simply clipped away by the dialog.
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        doc.intro,
+                        fontSize = 12.sp,
+                        color = AmberGold,
+                        lineHeight = 18.sp,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                    doc.sections.forEach { section ->
+                        Text(
+                            section.heading,
+                            fontSize = 13.sp,
+                            color = TextWhite,
+                            fontWeight = FontWeight.Bold,
+                            lineHeight = 18.sp,
+                            modifier = Modifier.padding(top = 10.dp, bottom = 3.dp)
+                        )
+                        section.body.forEach { paragraph ->
+                            Text(
+                                paragraph,
+                                fontSize = 12.sp,
+                                color = TextMuted,
+                                lineHeight = 18.sp,
+                                modifier = Modifier.padding(bottom = 4.dp)
+                            )
+                        }
+                        section.points.forEach { point ->
+                            Row(modifier = Modifier.padding(bottom = 4.dp)) {
+                                Text("•", fontSize = 12.sp, color = AmberGold, lineHeight = 18.sp)
+                                Text(
+                                    point,
+                                    fontSize = 12.sp,
+                                    color = TextMuted,
+                                    lineHeight = 18.sp,
+                                    modifier = Modifier.padding(start = 8.dp)
+                                )
+                            }
+                        }
+                    }
+                    doc.footNote?.let { note ->
+                        Text(
+                            note,
+                            fontSize = 11.sp,
+                            color = TextMuted,
+                            lineHeight = 16.sp,
+                            modifier = Modifier.padding(top = 14.dp)
+                        )
+                    }
+                }
+            },
             confirmButton = {
-                TextButton(onClick = { infoDialog = null }) { Text("Close", color = AmberGold, fontWeight = FontWeight.Bold) }
+                TextButton(onClick = { infoDoc = null }) { Text("Close", color = AmberGold, fontWeight = FontWeight.Bold) }
             }
         )
     }
@@ -511,28 +575,47 @@ fun SettingsScreen(
                         colors = torqueFieldColors(),
                         modifier = Modifier.fillMaxWidth()
                     )
+                    deleteError?.let { err ->
+                        Text(err, color = DangerRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             },
             confirmButton = {
                 Button(
-                    enabled = deleteConfirmText.trim().uppercase() == "DELETE",
+                    enabled = !deleting && deleteConfirmText.trim().uppercase() == "DELETE",
                     onClick = {
+                        deleting = true
+                        deleteError = null
                         scope.launch {
                             try {
                                 apiService.deleteAccount()
                                 showDeleteConfirm = false
-                                onLogout()
+                                deleteConfirmText = ""
+                                onAccountDeleted()
                             } catch (e: Exception) {
-                                statusMessage = e.localizedMessage
+                                // Surface the failure in the dialog itself; the
+                                // dialog stays open so the user can retry.
+                                deleteError = e.localizedMessage ?: "Could not delete the account. Please try again."
+                            } finally {
+                                deleting = false
                             }
                         }
                     },
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = DangerRed)
-                ) { Text("Delete Everything", color = Color.White, fontWeight = FontWeight.Black) }
+                ) {
+                    Text(
+                        if (deleting) "Deleting…" else "Delete Everything",
+                        color = Color.White,
+                        fontWeight = FontWeight.Black
+                    )
+                }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel", color = TextMuted) }
+                TextButton(
+                    enabled = !deleting,
+                    onClick = { showDeleteConfirm = false; deleteError = null }
+                ) { Text("Cancel", color = TextMuted) }
             }
         )
     }
