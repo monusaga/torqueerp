@@ -123,8 +123,18 @@ jobs:
             WEB_ROOT="${{ secrets.WEB_ROOT }}"
             PM2_APP="${{ secrets.PM2_APP_NAME }}"
 
-            fail() { echo "DEPLOY-FAILED: $1"; exit 1; }
+            # The action prints this script's output on the runner's stdout, and
+            # the runner turns ::error:: lines into annotations. Emitting one is
+            # what makes a server-side failure readable without log access.
+            fail() { echo "::error title=Deploy failed on the server::$1"; exit 1; }
+            note() { echo "::notice::$1"; }
 
+            # Report whatever aborts the script, including a command that fails
+            # outside an explicit check.
+            trap 'rc=$?; [ $rc -ne 0 ] && echo "::error title=Deploy aborted::The deploy script exited with status $rc. Last stage: $STAGE"' EXIT
+            STAGE="starting"
+
+            STAGE="Checking the server is set up as expected"
             echo "==> Checking the server is set up as expected"
             [ -d "$APP_DIR" ]      || fail "APP_DIR '$APP_DIR' does not exist on the server"
             [ -d "$APP_DIR/.git" ] || fail "APP_DIR '$APP_DIR' is not a git clone"
@@ -152,6 +162,7 @@ jobs:
             pm2 describe "$PM2_APP" >/dev/null 2>&1 \
               || fail "pm2 has no process named '$PM2_APP'. Existing: $(pm2 jlist | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{console.log(JSON.parse(d).map(p=>p.name).join(", ")||"(none)")}catch(e){console.log("(could not read pm2 list)")}})')"
 
+            STAGE="Pulling latest code"
             echo "==> Pulling latest code"
             cd "$APP_DIR"
             git fetch --all --prune
@@ -161,20 +172,24 @@ jobs:
             git reset --hard origin/main
             echo "    now at $(git rev-parse --short HEAD)"
 
+            STAGE="Building backend"
             echo "==> Building backend"
             cd "$APP_DIR/backend"
             npm ci
             npx prisma generate
             npm run build
 
+            STAGE="Restarting backend (pm2)"
             echo "==> Restarting backend (pm2)"
             pm2 restart "$PM2_APP" --update-env
 
+            STAGE="Building web"
             echo "==> Building web"
             cd "$APP_DIR/web"
             npm ci
             npm run build
 
+            STAGE="Publishing web to $WEB_ROOT"
             echo "==> Publishing web to $WEB_ROOT"
             # nginx may already point straight at the build directory, in which
             # case copying it onto itself would be pointless and could clobber
@@ -201,6 +216,7 @@ jobs:
               echo "    WARNING: no APK found in $APK_SRC — the download page will report the build as unavailable"
             fi
 
+            STAGE="Deploy complete"
             echo "==> Deploy complete"
 
       - name: Verify live deployment
