@@ -123,6 +123,10 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ steps.key.outputs.value }}
           port: ${{ secrets.SSH_PORT || 22 }}
+          # Two npm installs and two builds on a small VPS run well past the
+          # action's ten-minute default, which severs the session mid-deploy and
+          # looks exactly like a script error.
+          command_timeout: 30m
           script_stop: true
           script: |
             set -e
@@ -175,6 +179,10 @@ jobs:
                 | grep -v 'example\.com' | sort -u)
               [ -n "$ROOTS" ] || fail "Could not work out the web root from nginx. Set a WEB_ROOT secret."
               note "nginx roots: $(echo $ROOTS) | dist: $APP_DIR/web/dist (exists: $([ -d "$APP_DIR/web/dist" ] && echo yes || echo no))"
+              # The only declared root holds the stock nginx welcome page, yet
+              # the site is clearly served by nginx — so the vhost must reach the
+              # build some other way. Report it rather than keep guessing.
+              note "site vhost: $(nginx -T 2>/dev/null | grep -iE 'server_name|root|alias|proxy_pass|try_files' | grep -v '^\s*#' | tr '\n' ' ' | head -c 600)"
 
               # Several server blocks can declare a root, and the default one is
               # not the site. Prefer the root that is the app's own build output,
