@@ -15,6 +15,63 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      # Every run of this workflow has failed inside the SSH step with nothing
+      # but "exit code 1", which says nothing about the cause. These checks run
+      # first and report what is actually wrong as annotations, which are
+      # readable without repository admin rights.
+      - name: Preflight — required secrets
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          APP_DIR: ${{ secrets.APP_DIR }}
+          WEB_ROOT: ${{ secrets.WEB_ROOT }}
+          PM2_APP_NAME: ${{ secrets.PM2_APP_NAME }}
+          SITE_URL: ${{ secrets.SITE_URL }}
+        run: |
+          missing=""
+          for name in SSH_HOST SSH_USER SSH_KEY APP_DIR WEB_ROOT PM2_APP_NAME; do
+            if [ -z "${!name}" ]; then
+              echo "::error title=Missing secret::$name is not set in repository secrets"
+              missing="$missing $name"
+            else
+              echo "$name is set (${#name} char name, value hidden)"
+            fi
+          done
+          # Optional ones: report but do not fail.
+          [ -z "$SSH_PORT" ] && echo "::notice::SSH_PORT not set, defaulting to 22"
+          [ -z "$SITE_URL" ] && echo "::notice::SITE_URL not set, the verify step will be skipped"
+
+          if [ -n "$missing" ]; then
+            echo "::error title=Deploy cannot start::Set the missing secrets under Settings -> Secrets and variables -> Actions:$missing"
+            exit 1
+          fi
+
+          # A private key pasted without its trailing newline, or with Windows
+          # line endings, is a common and completely silent cause of failure.
+          if ! printf '%s' "$SSH_KEY" | head -1 | grep -q -- "-----BEGIN"; then
+            echo "::error title=SSH_KEY looks wrong::The key does not start with a -----BEGIN line. Paste the full private key file, including its header and footer lines."
+            exit 1
+          fi
+          if printf '%s' "$SSH_KEY" | grep -q $'\r'; then
+            echo "::error title=SSH_KEY has Windows line endings::Re-paste the key so it uses plain newlines."
+            exit 1
+          fi
+
+      - name: Preflight — can we reach the server
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+        run: |
+          port="${SSH_PORT:-22}"
+          if timeout 15 bash -c "cat < /dev/null > /dev/tcp/$SSH_HOST/$port" 2>/dev/null; then
+            echo "TCP connect to the SSH port succeeded."
+          else
+            echo "::error title=Cannot reach the SSH port::The runner could not open a TCP connection to the host on port $port. Check SSH_HOST, SSH_PORT, and whether the server firewall allows GitHub's runners."
+            exit 1
+          fi
+
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -29,10 +86,29 @@ jobs:
             WEB_ROOT="${{ secrets.WEB_ROOT }}"
             PM2_APP="${{ secrets.PM2_APP_NAME }}"
 
+            fail() { echo "DEPLOY-FAILED: $1"; exit 1; }
+
+            echo "==> Checking the server is set up as expected"
+            [ -d "$APP_DIR" ]      || fail "APP_DIR '$APP_DIR' does not exist on the server"
+            [ -d "$APP_DIR/.git" ] || fail "APP_DIR '$APP_DIR' is not a git clone"
+            [ -d "$WEB_ROOT" ]     || fail "WEB_ROOT '$WEB_ROOT' does not exist on the server"
+            [ -w "$WEB_ROOT" ]     || fail "WEB_ROOT '$WEB_ROOT' is not writable by $(whoami)"
+            command -v node >/dev/null || fail "node is not on PATH for this SSH session"
+            command -v npm  >/dev/null || fail "npm is not on PATH for this SSH session"
+            command -v pm2  >/dev/null || fail "pm2 is not on PATH for this SSH session"
+            echo "    node $(node -v), npm $(npm -v), pm2 $(pm2 -v | tail -1)"
+
+            pm2 describe "$PM2_APP" >/dev/null 2>&1 \
+              || fail "pm2 has no process named '$PM2_APP'. Existing: $(pm2 jlist | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{console.log(JSON.parse(d).map(p=>p.name).join(", ")||"(none)")}catch(e){console.log("(could not read pm2 list)")}})')"
+
             echo "==> Pulling latest code"
             cd "$APP_DIR"
-            git fetch --all
+            git fetch --all --prune
+            # A server left on a detached HEAD cannot fast-forward; pin it back
+            # onto main so the deploy is repeatable.
+            git checkout -B main origin/main
             git reset --hard origin/main
+            echo "    now at $(git rev-parse --short HEAD)"
 
             echo "==> Building backend"
             cd "$APP_DIR/backend"
@@ -51,19 +127,59 @@ jobs:
             echo "==> Publishing web to $WEB_ROOT"
             cp -r "$APP_DIR/web/dist/." "$WEB_ROOT/"
 
+            # The Android build ships in the repo because the server cannot
+            # build an APK; make sure the download the website links to is the
+            # real file and not a stale or missing one.
+            APK_SRC="$APP_DIR/web/public/downloads"
+            if ls "$APK_SRC"/*.apk >/dev/null 2>&1; then
+              mkdir -p "$WEB_ROOT/downloads" "$APP_DIR/backend/public/downloads"
+              cp -f "$APK_SRC"/*.apk "$WEB_ROOT/downloads/"
+              cp -f "$APK_SRC"/*.apk "$APP_DIR/backend/public/downloads/"
+              echo "    published $(ls -1 "$APK_SRC"/*.apk | wc -l) APK file(s):"
+              ls -lh "$WEB_ROOT/downloads"/*.apk | awk '{print "      " $9 " " $5}'
+            else
+              echo "    WARNING: no APK found in $APK_SRC — the download page will report the build as unavailable"
+            fi
+
             echo "==> Deploy complete"
 
       - name: Verify live deployment
+        if: ${{ secrets.SITE_URL != '' }}
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
         run: |
           sleep 5
+
           echo "--- backend Google auth config ---"
           # 401 INVALID_GOOGLE_TOKEN = configured correctly.
           # 503 GOOGLE_AUTH_NOT_CONFIGURED = env vars still missing on the server.
           curl -s -o /tmp/g.json -w "HTTP %{http_code}\n" \
-            -X POST "${{ secrets.SITE_URL }}/api/v1/auth/google" \
+            -X POST "$SITE_URL/api/v1/auth/google" \
             -H "Content-Type: application/json" \
             -d '{"credential":"probe.invalid"}' || true
           cat /tmp/g.json || true
           echo
+
           echo "--- served web bundle ---"
-          curl -s "${{ secrets.SITE_URL }}/" | grep -oE 'assets/index-[A-Za-z0-9_-]+\.js' | head -1 || true
+          curl -s "$SITE_URL/" | grep -oE 'assets/index-[A-Za-z0-9_-]+\.js' | head -1 || true
+
+          echo "--- published Android build ---"
+          info=$(curl -s "$SITE_URL/api/v1/downloads/android/info" || true)
+          echo "$info"
+          name=$(printf '%s' "$info" | grep -oE '"fileName":"[^"]+"' | cut -d'"' -f4)
+          want=$(printf '%s' "$info" | grep -oE '"sha256":"[a-f0-9]+"' | cut -d'"' -f4)
+          if [ -n "$name" ]; then
+            curl -s -o /tmp/app.apk "$SITE_URL/downloads/$name" || true
+            size=$(wc -c < /tmp/app.apk 2>/dev/null || echo 0)
+            got=$(sha256sum /tmp/app.apk 2>/dev/null | cut -d' ' -f1)
+            echo "downloaded $name: $size bytes"
+            if [ "$size" -lt 1000000 ]; then
+              echo "::error title=APK download is broken::$SITE_URL/downloads/$name returned only $size bytes. The published build is missing or truncated."
+              exit 1
+            elif [ -n "$want" ] && [ "$got" != "$want" ]; then
+              echo "::error title=APK checksum mismatch::served $got but the site advertises $want"
+              exit 1
+            else
+              echo "APK download verified ($size bytes, sha256 matches)."
+            fi
+          fi
