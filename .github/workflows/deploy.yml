@@ -134,6 +134,26 @@ jobs:
             trap 'rc=$?; [ $rc -ne 0 ] && echo "::error title=Deploy aborted::The deploy script exited with status $rc. Last stage: $STAGE"' EXIT
             STAGE="starting"
 
+            # node here is installed through nvm, which puts itself on PATH from
+            # ~/.bashrc — and that is only read by interactive shells. An SSH
+            # command session is not interactive, so node, npm and pm2 are all
+            # missing unless nvm is loaded explicitly.
+            STAGE="Loading the node environment"
+            export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+            if [ -s "$NVM_DIR/nvm.sh" ]; then
+              # nvm.sh is not written to survive `set -e`/unset-variable checks.
+              set +e
+              . "$NVM_DIR/nvm.sh" --no-use >/dev/null 2>&1
+              nvm use --lts >/dev/null 2>&1 || nvm use default >/dev/null 2>&1 || true
+              set -e
+            fi
+            # Fall back to whatever node versions nvm has on disk, plus the usual
+            # system locations, so a missing or unusual nvm setup is survivable.
+            for d in "$NVM_DIR"/versions/node/*/bin /usr/local/bin /usr/bin; do
+              [ -d "$d" ] && PATH="$d:$PATH"
+            done
+            export PATH
+
             STAGE="Checking the server is set up as expected"
             echo "==> Checking the server is set up as expected"
             [ -d "$APP_DIR" ]      || fail "APP_DIR '$APP_DIR' does not exist on the server"
@@ -154,9 +174,9 @@ jobs:
 
             [ -d "$WEB_ROOT" ]     || fail "WEB_ROOT '$WEB_ROOT' does not exist on the server"
             [ -w "$WEB_ROOT" ]     || fail "WEB_ROOT '$WEB_ROOT' is not writable by $(whoami)"
-            command -v node >/dev/null || fail "node is not on PATH for this SSH session"
-            command -v npm  >/dev/null || fail "npm is not on PATH for this SSH session"
-            command -v pm2  >/dev/null || fail "pm2 is not on PATH for this SSH session"
+            command -v node >/dev/null || fail "node is still not on PATH after loading nvm from $NVM_DIR. Checked: $NVM_DIR/versions/node/*/bin, /usr/local/bin, /usr/bin"
+            command -v npm  >/dev/null || fail "npm is not on PATH even though node is at $(command -v node)"
+            command -v pm2  >/dev/null || fail "pm2 is not on PATH even though node is at $(command -v node). Install it globally, or add its bin directory."
             echo "    node $(node -v), npm $(npm -v), pm2 $(pm2 -v | tail -1)"
 
             pm2 describe "$PM2_APP" >/dev/null 2>&1 \
