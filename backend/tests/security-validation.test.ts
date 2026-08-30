@@ -103,4 +103,25 @@ describe('Input Validation & Security Hardening Tests', () => {
     expect(res.headers['x-content-type-options']).toBe('nosniff');
     expect(res.headers['x-frame-options']).toBeDefined();
   });
+
+  it('reports an unparseable body as a client error, not a server failure', async () => {
+    const res = await request(app)
+      .post('/api/v1/products')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Content-Type', 'application/json')
+      .send('{not json');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('MALFORMED_JSON');
+  });
+
+  it('still hides internal details when something genuinely fails', async () => {
+    // A route that does not exist must not surface a stack trace either.
+    const res = await request(app)
+      .get('/api/v1/definitely-not-a-route')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(JSON.stringify(res.body)).not.toMatch(/at .*\.ts:\d+/);
+  });
 });

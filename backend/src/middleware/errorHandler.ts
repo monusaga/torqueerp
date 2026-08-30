@@ -34,6 +34,19 @@ export const errorHandler = (
     return;
   }
 
+  // A body express could not parse is the caller's mistake, not ours. Reporting
+  // it as a 500 told the client the server had broken and filled the error log
+  // with entries no one can act on.
+  if (err instanceof SyntaxError && 'body' in err && (err as any).status === 400) {
+    res.status(400).json({
+      error: {
+        code: 'MALFORMED_JSON',
+        message: 'The request body is not valid JSON.',
+      },
+    });
+    return;
+  }
+
   // Handle Custom Application Errors
   if (err instanceof AppError) {
     res.status(err.statusCode).json({

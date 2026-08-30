@@ -26,7 +26,7 @@ export const Navbar: React.FC = () => {
         </Link>
 
         {/* Desktop Navigation Links */}
-        <nav className="hidden md:flex items-center space-x-6 text-xs uppercase tracking-wider font-bold text-slate-600">
+        <nav className="hidden lg:flex items-center space-x-6 text-xs uppercase tracking-wider font-bold text-slate-600">
           <Link to="/features" className="hover:text-amber-600 transition">Features</Link>
           <Link to="/spare-parts" className="hover:text-amber-600 transition">Spare Parts</Link>
           <Link to="/pricing" className="hover:text-amber-600 transition">Pricing</Link>
@@ -34,7 +34,7 @@ export const Navbar: React.FC = () => {
         </nav>
 
         {/* CTA Buttons */}
-        <div className="hidden md:flex items-center space-x-2.5">
+        <div className="hidden lg:flex items-center space-x-2.5">
           <Link
             to="/download-app"
             className="bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 text-xs font-black uppercase tracking-wider px-3.5 py-2.5 rounded-xl transition flex items-center space-x-1.5 shadow-sm"
@@ -78,7 +78,7 @@ export const Navbar: React.FC = () => {
         {/* Mobile menu trigger */}
         <button
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="md:hidden p-2 text-slate-600 hover:text-slate-900"
+          className="lg:hidden p-2 text-slate-600 hover:text-slate-900"
         >
           {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
         </button>
@@ -86,7 +86,7 @@ export const Navbar: React.FC = () => {
 
       {/* Mobile Drawer */}
       {mobileMenuOpen && (
-        <div className="md:hidden border-b border-slate-200 bg-white px-4 pt-3 pb-6 space-y-3 shadow-lg">
+        <div className="lg:hidden border-b border-slate-200 bg-white px-4 pt-3 pb-6 space-y-3 shadow-lg">
           <Link
             to="/features"
             onClick={() => setMobileMenuOpen(false)}
@@ -107,6 +107,20 @@ export const Navbar: React.FC = () => {
             className="block py-2 text-slate-700 hover:text-amber-600 font-semibold text-sm"
           >
             Pricing
+          </Link>
+          <Link
+            to="/faq"
+            onClick={() => setMobileMenuOpen(false)}
+            className="block py-2 text-slate-700 hover:text-amber-600 font-semibold text-sm"
+          >
+            FAQ
+          </Link>
+          <Link
+            to="/support"
+            onClick={() => setMobileMenuOpen(false)}
+            className="block py-2 text-slate-700 hover:text-amber-600 font-semibold text-sm"
+          >
+            Support
           </Link>
           <Link
             to="/download-app"

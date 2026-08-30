@@ -447,14 +447,16 @@ export const POSPage: React.FC = () => {
               are kept so the selector can be restored without touching the
               checkout contract. */}
 
-          {/* Tax & Discount Controls */}
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <div className="flex items-center justify-between bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-xl">
-              <span className="text-slate-600 font-semibold">GST Rate:</span>
+          {/* Tax & Discount Controls. Side by side these two cells are too narrow
+              for the longest GST label, which was being chopped mid-word, so they
+              stack until there is room for both. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+            <div className="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-xl">
+              <span className="text-slate-600 font-semibold flex-shrink-0">GST Rate:</span>
               <select
                 value={taxRate}
                 onChange={(e) => setTaxRate(parseFloat(e.target.value) || 0)}
-                className="bg-transparent font-black text-slate-900 focus:outline-none cursor-pointer"
+                className="bg-transparent font-black text-slate-900 focus:outline-none cursor-pointer min-w-0 text-right"
               >
                 <option value={0}>0% (Exempt)</option>
                 <option value={5}>5% GST</option>
@@ -464,8 +466,8 @@ export const POSPage: React.FC = () => {
               </select>
             </div>
 
-            <div className="flex items-center justify-between bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-xl">
-              <span className="text-slate-600 font-semibold">Discount %:</span>
+            <div className="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-xl">
+              <span className="text-slate-600 font-semibold flex-shrink-0">Discount %:</span>
               <input
                 type="number"
                 min="0"
