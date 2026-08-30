@@ -170,11 +170,34 @@ jobs:
             # ask it rather than making someone dig the path out by hand. An
             # explicit WEB_ROOT still wins if one is configured.
             if [ -z "$WEB_ROOT" ]; then
-              WEB_ROOT=$(nginx -T 2>/dev/null \
+              ROOTS=$(nginx -T 2>/dev/null \
                 | awk '$1 == "root" { gsub(/;/, "", $2); print $2 }' \
-                | grep -v 'example\.com' | sort -u | head -1)
-              [ -n "$WEB_ROOT" ] || fail "Could not work out the web root from nginx. Set a WEB_ROOT secret."
-              echo "    resolved WEB_ROOT from nginx: $WEB_ROOT"
+                | grep -v 'example\.com' | sort -u)
+              [ -n "$ROOTS" ] || fail "Could not work out the web root from nginx. Set a WEB_ROOT secret."
+              echo "    nginx roots: $(echo $ROOTS)"
+
+              # Several server blocks can declare a root, and the default one is
+              # not the site. Prefer the root that is the app's own build output,
+              # then any root that already holds a built bundle, before falling
+              # back to the first — picking blindly published to the wrong place.
+              DIST="$APP_DIR/web/dist"
+              WEB_ROOT=""
+              for r in $ROOTS; do
+                if [ "$(readlink -f "$r" 2>/dev/null)" = "$(readlink -f "$DIST" 2>/dev/null)" ]; then
+                  WEB_ROOT="$r"; echo "    chose '$r' — it is the build directory"; break
+                fi
+              done
+              if [ -z "$WEB_ROOT" ]; then
+                for r in $ROOTS; do
+                  if ls "$r"/assets/index-*.js >/dev/null 2>&1; then
+                    WEB_ROOT="$r"; echo "    chose '$r' — it already serves a built bundle"; break
+                  fi
+                done
+              fi
+              if [ -z "$WEB_ROOT" ]; then
+                WEB_ROOT=$(echo "$ROOTS" | head -1)
+                echo "    no root looked like the site; falling back to '$WEB_ROOT'"
+              fi
             else
               echo "    using configured WEB_ROOT: $WEB_ROOT"
             fi
@@ -232,15 +255,19 @@ jobs:
             # The Android build ships in the repo because the server cannot
             # build an APK; make sure the download the website links to is the
             # real file and not a stale or missing one.
+            STAGE="Publishing the Android build"
+            echo "==> Publishing the Android build"
             APK_SRC="$APP_DIR/web/public/downloads"
             if ls "$APK_SRC"/*.apk >/dev/null 2>&1; then
               mkdir -p "$WEB_ROOT/downloads" "$APP_DIR/backend/public/downloads"
-              cp -f "$APK_SRC"/*.apk "$WEB_ROOT/downloads/"
-              cp -f "$APK_SRC"/*.apk "$APP_DIR/backend/public/downloads/"
+              cp -f "$APK_SRC"/*.apk "$WEB_ROOT/downloads/" \
+                || fail "Could not copy the APK into '$WEB_ROOT/downloads'"
+              cp -f "$APK_SRC"/*.apk "$APP_DIR/backend/public/downloads/" \
+                || fail "Could not copy the APK into the backend downloads directory"
               echo "    published $(ls -1 "$APK_SRC"/*.apk | wc -l) APK file(s):"
               ls -lh "$WEB_ROOT/downloads"/*.apk | awk '{print "      " $9 " " $5}'
             else
-              echo "    WARNING: no APK found in $APK_SRC — the download page will report the build as unavailable"
+              fail "No APK in '$APK_SRC'. The published build ships in the repo, so the website has nothing to serve — check that the file was committed and that the server's checkout is current."
             fi
 
             STAGE="Deploy complete"
