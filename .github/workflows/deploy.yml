@@ -49,16 +49,37 @@ jobs:
             exit 1
           fi
 
-          # A private key pasted without its trailing newline, or with Windows
-          # line endings, is a common and completely silent cause of failure.
-          if ! printf '%s' "$SSH_KEY" | head -1 | grep -q -- "-----BEGIN"; then
-            echo "::error title=SSH_KEY looks wrong::The key does not start with a -----BEGIN line. Paste the full private key file, including its header and footer lines."
+          # Describe the key's shape without ever printing it, so a bad paste is
+          # identifiable. Leading blank lines are cosmetic and must not block the
+          # deploy — only a value that plainly is not a private key should.
+          lines=$(printf '%s\n' "$SSH_KEY" | grep -c '' || true)
+          echo "SSH_KEY: $lines line(s)"
+
+          if printf '%s' "$SSH_KEY" | grep -qE '^[[:space:]]*(ssh-(rsa|ed25519)|ecdsa-sha2)'; then
+            echo "::error title=SSH_KEY is a public key::This is the .pub file. Use the private key — the file without the .pub extension, whose first line reads -----BEGIN OPENSSH PRIVATE KEY-----."
             exit 1
           fi
+
+          if ! printf '%s' "$SSH_KEY" | grep -q -- "-----BEGIN"; then
+            echo "::error title=SSH_KEY has no BEGIN line::The value does not contain a -----BEGIN ... PRIVATE KEY----- line anywhere. Copy the whole private key file, header and footer included."
+            exit 1
+          fi
+          if ! printf '%s' "$SSH_KEY" | grep -q -- "-----END"; then
+            echo "::error title=SSH_KEY is truncated::A -----BEGIN line is present but the matching -----END line is missing, so only part of the key was pasted."
+            exit 1
+          fi
+          if [ "$lines" -lt 3 ]; then
+            echo "::error title=SSH_KEY lost its line breaks::The key arrived as $lines line(s). It must keep one key line per line; pasting through a single-line field collapses it."
+            exit 1
+          fi
+
           if printf '%s' "$SSH_KEY" | grep -q $'\r'; then
-            echo "::error title=SSH_KEY has Windows line endings::Re-paste the key so it uses plain newlines."
-            exit 1
+            echo "::notice::SSH_KEY contains carriage returns; they will be stripped before use."
           fi
+          if ! printf '%s' "$SSH_KEY" | head -1 | grep -q -- "-----BEGIN"; then
+            echo "::notice::SSH_KEY does not begin on its first line (probably a leading blank line). Continuing."
+          fi
+          echo "SSH_KEY looks like a private key."
 
       - name: Preflight — can we reach the server
         env:
@@ -73,12 +94,30 @@ jobs:
             exit 1
           fi
 
+      # Copying a key out of a terminal often picks up a leading blank line or
+      # carriage returns. Those are cosmetic, but ssh rejects the key over them,
+      # so normalise the value rather than making someone re-paste it perfectly.
+      - name: Normalise the SSH key
+        id: key
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+        run: |
+          clean=$(printf '%s' "$SSH_KEY" | tr -d '\r' | sed '/./,$!d')
+          # Keep it out of the log: write to the step output via a file.
+          {
+            echo 'value<<SSH_KEY_EOF'
+            printf '%s\n' "$clean"
+            echo 'SSH_KEY_EOF'
+          } >> "$GITHUB_OUTPUT"
+          echo "::add-mask::$clean"
+          echo "normalised to $(printf '%s\n' "$clean" | grep -c '') lines"
+
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
+          key: ${{ steps.key.outputs.value }}
           port: ${{ secrets.SSH_PORT || 22 }}
           script_stop: true
           script: |
