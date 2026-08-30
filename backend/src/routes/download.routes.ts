@@ -10,11 +10,11 @@ const APK_METADATA = {
   versionCode: 5,
   minAndroidVersion: 'Android 8.0 (Oreo / API Level 26)',
   targetAndroidVersion: 'Android 15 (Vanilla Ice Cream / API Level 35/36)',
-  releaseDate: '2026-08-28',
+  releaseDate: '2026-08-30',
   fileSizeMb: '71.4 MB',
   packageId: 'com.torqueerp.app',
   fileName: 'MonuSagar-v1.4.0.apk',
-  sha256: '25c206ef12153873fd87c3ac9ebaf49c3f6afc7a36facc0649557676452b44f6',
+  sha256: '6373d8c9ff68aa567a9bc7ea1ebd4c60e86a42ce57485152a43358954d85e3df',
 };
 
 // GET /api/v1/downloads/android/info - Version metadata

@@ -73,6 +73,9 @@ interface ApiService {
     @PUT("products/{id}")
     suspend fun updateProduct(@Path("id") id: String, @Body request: UpdateProductRequest): ProductResponse
 
+    @DELETE("products/{id}")
+    suspend fun deleteProduct(@Path("id") id: String): DeleteProductResponse
+
     // Inventory & Stock Ledger
     @POST("inventory/adjust")
     suspend fun adjustStock(@Body request: StockAdjustmentRequest): GenericSuccessResponse

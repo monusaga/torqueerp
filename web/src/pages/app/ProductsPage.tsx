@@ -15,6 +15,7 @@ import {
   Car,
   Bike,
   Sparkles,
+  Trash2,
 } from 'lucide-react';
 import { apiRequest } from '../../lib/api';
 import { CameraScannerModal } from '../../components/CameraScannerModal';
@@ -52,6 +53,10 @@ export const ProductsPage: React.FC = () => {
 
   const [savingProduct, setSavingProduct] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<any | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [noticeMsg, setNoticeMsg] = useState<string | null>(null);
 
   const SPARE_CATEGORIES = [
     'Braking System',
@@ -273,18 +278,19 @@ export const ProductsPage: React.FC = () => {
                 <th className="p-4 text-right">Cost (₹)</th>
                 <th className="p-4 text-right">Selling Price (₹)</th>
                 <th className="p-4 text-center">Stock Level</th>
+                <th className="p-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {isLoading ? (
                 <tr>
-                  <td colSpan={6} className="p-8 text-center text-slate-400">
+                  <td colSpan={7} className="p-8 text-center text-slate-400">
                     Loading products...
                   </td>
                 </tr>
               ) : products.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="p-12 text-center text-slate-400">
+                  <td colSpan={7} className="p-12 text-center text-slate-400">
                     <Package className="w-8 h-8 mx-auto text-slate-300 mb-2" />
                     <p className="font-bold text-slate-700">No spare parts found</p>
                     <p className="text-[11px] text-slate-500 mt-1">Try changing your search or add a new part.</p>
@@ -329,6 +335,15 @@ export const ProductsPage: React.FC = () => {
                         >
                           <span>{p.currentStock} units</span>
                         </span>
+                      </td>
+                      <td className="p-4 text-right">
+                        <button
+                          onClick={() => setPendingDelete(p)}
+                          title={`Remove ${p.name}`}
+                          className="text-slate-400 hover:text-red-600 transition p-1.5 rounded-lg hover:bg-red-50"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </td>
                     </tr>
                   );
@@ -594,6 +609,76 @@ export const ProductsPage: React.FC = () => {
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* Confirm removal. A transacted part is archived, never erased, so past
+          invoices keep their lines — the wording says so before they commit. */}
+      {pendingDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-md shadow-2xl p-6">
+            <h3 className="font-black text-base text-red-700 uppercase">Remove this part?</h3>
+            <p className="font-bold text-slate-900 text-sm mt-4">{pendingDelete.name}</p>
+            <p className="text-xs text-amber-800 font-mono font-bold mt-0.5">
+              {pendingDelete.partNumber}
+            </p>
+            <p className="text-xs text-slate-500 leading-relaxed mt-4">
+              If this part has already been bought or sold it is archived, not erased — it leaves
+              the catalog while every past invoice stays exactly as it was. A part that was never
+              used is removed completely.
+            </p>
+            {deleteError && (
+              <p className="text-xs text-red-600 font-bold mt-3">{deleteError}</p>
+            )}
+            <div className="flex justify-end gap-2 mt-6">
+              <button
+                disabled={isDeleting}
+                onClick={() => {
+                  setPendingDelete(null);
+                  setDeleteError(null);
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition disabled:opacity-50"
+              >
+                Keep
+              </button>
+              <button
+                disabled={isDeleting}
+                onClick={async () => {
+                  setIsDeleting(true);
+                  setDeleteError(null);
+                  try {
+                    const res = await apiRequest<{ message?: string }>(
+                      `/products/${pendingDelete.id}`,
+                      { method: 'DELETE' }
+                    );
+                    setPendingDelete(null);
+                    setNoticeMsg(res.message ?? 'Part removed.');
+                    fetchProducts();
+                  } catch (err: any) {
+                    setDeleteError(err?.message ?? 'Could not remove this part.');
+                  } finally {
+                    setIsDeleting(false);
+                  }
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-black text-white bg-red-600 hover:bg-red-700 transition disabled:opacity-50"
+              >
+                {isDeleting ? 'Removing…' : 'Remove'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {noticeMsg && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-3 rounded-xl shadow-2xl max-w-md flex items-start gap-3">
+          <span className="flex-1">{noticeMsg}</span>
+          <button
+            onClick={() => setNoticeMsg(null)}
+            className="text-slate-400 hover:text-white flex-shrink-0"
+            aria-label="Dismiss"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 

@@ -275,12 +275,46 @@ router.post('/', authenticateJwt, requireTenant, async (req: Request, res: Respo
       },
     });
 
-    if (existing) {
+    if (existing && existing.isActive) {
       throw new AppError(
         `A product with Part Number "${productData.partNumber}" already exists in this business.`,
         409,
         'DUPLICATE_PRODUCT'
       );
+    }
+
+    // An archived product still holds its part number, because the unique key
+    // covers the whole business. Re-adding that part — by scanning it again, say
+    // — brings the same row back with the new details rather than failing on a
+    // duplicate the shopkeeper cannot see in the catalog.
+    if (existing) {
+      const revived = await prisma.$transaction(async (tx) => {
+        const p = await tx.product.update({
+          where: { id: existing.id },
+          data: { ...productData, isActive: true },
+        });
+
+        if (initialStock && initialStock > 0) {
+          await StockLedgerService.recordMovement(
+            {
+              businessId: req.business!.id,
+              productId: p.id,
+              movementType: 'OPENING_STOCK',
+              quantity: initialStock,
+              unitCost: p.purchaseCost,
+              userId: req.user!.id,
+              notes: 'Opening stock recorded when the archived product was restored',
+            },
+            tx
+          );
+        }
+
+        return p;
+      });
+
+      const refreshedRevived = await prisma.product.findUnique({ where: { id: revived.id } });
+      res.status(201).json({ product: refreshedRevived, restored: true });
+      return;
     }
 
     const product = await prisma.$transaction(async (tx) => {
@@ -316,6 +350,68 @@ router.post('/', authenticateJwt, requireTenant, async (req: Request, res: Respo
     });
 
     res.status(201).json({ product: refreshed });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// DELETE /api/v1/products/:id - Remove a product from the catalog.
+//
+// Every relation pointing at Product cascades, so deleting a row that has been
+// sold or purchased would take its invoice lines and stock ledger entries with
+// it and silently rewrite past invoices and profit figures. A product with that
+// history is therefore archived instead: it disappears from the catalog, search
+// and scanning, while every historical record stays intact. Only a product that
+// was never transacted — the mis-scan a shopkeeper wants gone — is removed for
+// real, since its sole trace is its own opening-stock entry.
+router.delete('/:id', authenticateJwt, requireTenant, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const businessId = req.business!.id;
+    const id = String(req.params.id);
+
+    const product = await prisma.product.findFirst({ where: { id, businessId } });
+    if (!product) {
+      throw new AppError('Product not found in this business.', 404, 'PRODUCT_NOT_FOUND');
+    }
+
+    const [saleItems, purchaseItems, returnItems] = await Promise.all([
+      prisma.saleItem.count({ where: { productId: id } }),
+      prisma.purchaseItem.count({ where: { productId: id } }),
+      prisma.returnItem.count({ where: { productId: id } }),
+    ]);
+    const transactionCount = saleItems + purchaseItems + returnItems;
+
+    if (transactionCount > 0) {
+      if (!product.isActive) {
+        res.json({
+          success: true,
+          action: 'ALREADY_ARCHIVED',
+          message: `"${product.name}" is already archived.`,
+        });
+        return;
+      }
+
+      const archived = await prisma.product.update({
+        where: { id },
+        data: { isActive: false },
+      });
+
+      res.json({
+        success: true,
+        action: 'ARCHIVED',
+        message: `"${product.name}" has been archived. It no longer appears in the catalog, and its ${transactionCount} past record${transactionCount === 1 ? '' : 's'} stay unchanged.`,
+        product: archived,
+      });
+      return;
+    }
+
+    await prisma.product.delete({ where: { id } });
+
+    res.json({
+      success: true,
+      action: 'DELETED',
+      message: `"${product.name}" has been deleted.`,
+    });
   } catch (error) {
     next(error);
   }

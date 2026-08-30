@@ -59,6 +59,9 @@ fun ProductsScreen(
     var editingProduct by remember { mutableStateOf<Product?>(null) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var pendingOcr by remember { mutableStateOf<ExtractedOCRData?>(null) }
+    var confirmDeleteProduct by remember { mutableStateOf<Product?>(null) }
+    var deleting by remember { mutableStateOf(false) }
+    var deleteError by remember { mutableStateOf<String?>(null) }
 
     val scope = rememberCoroutineScope()
     val brands = listOf(
@@ -477,8 +480,71 @@ fun ProductsScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { closeDialog() }) {
-                    Text("Cancel", color = TextMuted)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (isEditing) {
+                        TextButton(onClick = { confirmDeleteProduct = initial }) {
+                            Text("Delete", color = DangerRed, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    TextButton(onClick = { closeDialog() }) {
+                        Text("Cancel", color = TextMuted)
+                    }
+                }
+            }
+        )
+    }
+
+
+    // ---- Confirm removal ------------------------------------------------
+    confirmDeleteProduct?.let { target ->
+        AlertDialog(
+            onDismissRequest = { if (!deleting) { confirmDeleteProduct = null; deleteError = null } },
+            containerColor = SlateCard,
+            title = { Text("Remove this part?", color = DangerRed, fontWeight = FontWeight.Black) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(target.name, color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text("Part #: " + target.partNumber, color = AmberGold, fontSize = 12.sp)
+                    Text(
+                        "If this part has already been bought or sold it is archived, not erased " +
+                            "— it leaves the catalog while every past invoice stays exactly as it was. " +
+                            "A part that was never used is removed completely.",
+                        color = TextMuted, fontSize = 12.sp, lineHeight = 18.sp
+                    )
+                    deleteError?.let { err -> Text(err, color = DangerRed, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = !deleting,
+                    onClick = {
+                        deleting = true
+                        deleteError = null
+                        scope.launch {
+                            try {
+                                val res = apiService.deleteProduct(target.id)
+                                confirmDeleteProduct = null
+                                // Close the edit dialog underneath as well.
+                                showAddDialog = false
+                                editingProduct = null
+                                pendingOcr = null
+                                statusMessage = res.message
+                                loadProducts()
+                            } catch (e: Exception) {
+                                deleteError = e.localizedMessage ?: "Could not remove this part."
+                            } finally {
+                                deleting = false
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DangerRed)
+                ) {
+                    Text(if (deleting) "Removing…" else "Remove", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(enabled = !deleting, onClick = { confirmDeleteProduct = null; deleteError = null }) {
+                    Text("Keep", color = TextMuted)
                 }
             }
         )

@@ -474,3 +474,13 @@ data class GenericSuccessResponse(
     val success: Boolean,
     val message: String?
 )
+
+/**
+ * A transacted product is archived rather than deleted, so past invoices keep
+ * their lines. `action` says which happened: DELETED | ARCHIVED | ALREADY_ARCHIVED.
+ */
+data class DeleteProductResponse(
+    val success: Boolean,
+    val action: String,
+    val message: String?
+)
