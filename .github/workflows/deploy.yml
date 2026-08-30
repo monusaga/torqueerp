@@ -246,15 +246,28 @@ jobs:
             # files mid-read. Only copy when the two are genuinely different.
             DIST="$APP_DIR/web/dist"
             [ -d "$DIST" ] || fail "The web build produced no '$DIST' directory."
-            if [ "$(readlink -f "$WEB_ROOT")" = "$(readlink -f "$DIST")" ]; then
+
+            # This block has aborted without reaching the copy, and set -e gives
+            # no clue which line did it. Run it with errors handled explicitly so
+            # every step reports its own outcome.
+            set +e
+            real_root=$(readlink -f "$WEB_ROOT" 2>&1); rc_root=$?
+            real_dist=$(readlink -f "$DIST" 2>&1); rc_dist=$?
+            note "web root '$WEB_ROOT' -> '${real_root}' (rc=$rc_root); dist -> '${real_dist}' (rc=$rc_dist)"
+            note "web root contents: $(ls -A "$WEB_ROOT" 2>&1 | head -c 300)"
+            note "writable by $(whoami): $([ -w "$WEB_ROOT" ] && echo yes || echo no); free space: $(df -Ph "$WEB_ROOT" 2>/dev/null | awk 'NR==2{print $4}')"
+
+            if [ "$real_root" = "$real_dist" ]; then
               note "web root is the build directory itself — nothing to copy"
             else
-              # Report what cp actually said; "exit 1" alone gives nothing to act on.
-              if ! cp_err=$(cp -r "$DIST/." "$WEB_ROOT/" 2>&1); then
-                fail "Copying the site into '$WEB_ROOT' failed: ${cp_err:-no error text}"
+              cp_err=$(cp -r "$DIST/." "$WEB_ROOT/" 2>&1); rc_cp=$?
+              if [ $rc_cp -ne 0 ]; then
+                set -e
+                fail "Copying the site into '$WEB_ROOT' failed (exit $rc_cp): ${cp_err:-no error text}"
               fi
               note "copied $DIST -> $WEB_ROOT"
             fi
+            set -e
 
             # The Android build ships in the repo because the server cannot
             # build an APK; make sure the download the website links to is the
