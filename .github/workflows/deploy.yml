@@ -74,12 +74,19 @@ jobs:
           SSH_PORT: ${{ secrets.SSH_PORT }}
         run: |
           port="${SSH_PORT:-22}"
-          if timeout 15 bash -c "cat < /dev/null > /dev/tcp/$SSH_HOST/$port" 2>/dev/null; then
-            echo "TCP connect to the SSH port succeeded."
-          else
-            echo "::error title=Cannot reach the SSH port::The runner could not open a TCP connection to the host on port $port. Check SSH_HOST, SSH_PORT, and whether the server firewall allows GitHub's runners."
-            exit 1
-          fi
+          # A single probe is not evidence: this check has both passed and failed
+          # against the same reachable host, so give a transient hiccup room to
+          # clear before calling the server unreachable.
+          for attempt in 1 2 3 4 5; do
+            if timeout 10 bash -c "cat < /dev/null > /dev/tcp/$SSH_HOST/$port" 2>/dev/null; then
+              echo "TCP connect to the SSH port succeeded on attempt $attempt."
+              exit 0
+            fi
+            echo "attempt $attempt could not connect; retrying"
+            sleep 6
+          done
+          echo "::error title=Cannot reach the SSH port::Five attempts over ~40s could not open a TCP connection to the host on port $port. Check SSH_HOST, SSH_PORT, and whether the server firewall or fail2ban is blocking GitHub's runners."
+          exit 1
 
       # Copying a key out of a terminal often picks up a leading blank line or
       # carriage returns. Those are cosmetic, but ssh rejects the key over them,
