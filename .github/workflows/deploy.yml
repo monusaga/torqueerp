@@ -144,10 +144,15 @@ jobs:
             echo "==> Deploy complete"
 
       - name: Verify live deployment
-        if: ${{ secrets.SITE_URL != '' }}
         env:
           SITE_URL: ${{ secrets.SITE_URL }}
         run: |
+          # The secrets context is not available to step-level `if`, so the
+          # skip is decided here instead.
+          if [ -z "$SITE_URL" ]; then
+            echo "SITE_URL is not set — skipping live verification."
+            exit 0
+          fi
           sleep 5
 
           echo "--- backend Google auth config ---"
