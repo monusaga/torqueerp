@@ -55,13 +55,14 @@ jobs:
           lines=$(printf '%s\n' "$SSH_KEY" | grep -c '' || true)
           echo "SSH_KEY: $lines line(s)"
 
-          if printf '%s' "$SSH_KEY" | grep -qE '^[[:space:]]*(ssh-(rsa|ed25519)|ecdsa-sha2)'; then
+          if printf '%s' "$SSH_KEY" | grep -qE '^[[:space:]]*(ssh-(rsa|ed25519)|ecdsa-sha2)' \
+             && ! printf '%s' "$SSH_KEY" | grep -q -- "-----BEGIN"; then
             echo "::error title=SSH_KEY is a public key::This is the .pub file. Use the private key — the file without the .pub extension, whose first line reads -----BEGIN OPENSSH PRIVATE KEY-----."
             exit 1
           fi
 
           if ! printf '%s' "$SSH_KEY" | grep -q -- "-----BEGIN"; then
-            echo "::error title=SSH_KEY has no BEGIN line::The value does not contain a -----BEGIN ... PRIVATE KEY----- line anywhere. Copy the whole private key file, header and footer included."
+            echo "::error title=SSH_KEY has no BEGIN line::The value does not contain a -----BEGIN ... PRIVATE KEY----- line anywhere. When copying, start the selection at the -----BEGIN line and end it after the -----END line."
             exit 1
           fi
           if ! printf '%s' "$SSH_KEY" | grep -q -- "-----END"; then
@@ -102,7 +103,12 @@ jobs:
         env:
           SSH_KEY: ${{ secrets.SSH_KEY }}
         run: |
-          clean=$(printf '%s' "$SSH_KEY" | tr -d '\r' | sed '/./,$!d')
+          # Take only the key block. Copying out of a terminal easily picks up a
+          # surrounding banner or the shell prompt, and ssh rejects the key over
+          # anything extra, so extract from BEGIN through END rather than trust
+          # the selection to have been exact.
+          clean=$(printf '%s' "$SSH_KEY" | tr -d '\r' | sed -n '/-----BEGIN/,/-----END/p')
+          [ -n "$clean" ] || clean=$(printf '%s' "$SSH_KEY" | tr -d '\r' | sed '/./,$!d')
           # Keep it out of the log: write to the step output via a file.
           {
             echo 'value<<SSH_KEY_EOF'
