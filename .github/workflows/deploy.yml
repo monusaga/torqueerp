@@ -31,7 +31,7 @@ jobs:
           SITE_URL: ${{ secrets.SITE_URL }}
         run: |
           missing=""
-          for name in SSH_HOST SSH_USER SSH_KEY APP_DIR WEB_ROOT PM2_APP_NAME; do
+          for name in SSH_HOST SSH_USER SSH_KEY APP_DIR PM2_APP_NAME; do
             if [ -z "${!name}" ]; then
               echo "::error title=Missing secret::$name is not set in repository secrets"
               missing="$missing $name"
@@ -42,6 +42,7 @@ jobs:
           # Optional ones: report but do not fail.
           [ -z "$SSH_PORT" ] && echo "::notice::SSH_PORT not set, defaulting to 22"
           [ -z "$SITE_URL" ] && echo "::notice::SITE_URL not set, the verify step will be skipped"
+          [ -z "$WEB_ROOT" ] && echo "::notice::WEB_ROOT not set — the deploy will ask nginx which directory serves the site"
 
           if [ -n "$missing" ]; then
             echo "::error title=Deploy cannot start::Set the missing secrets under Settings -> Secrets and variables -> Actions:$missing"
@@ -91,6 +92,20 @@ jobs:
             echo "==> Checking the server is set up as expected"
             [ -d "$APP_DIR" ]      || fail "APP_DIR '$APP_DIR' does not exist on the server"
             [ -d "$APP_DIR/.git" ] || fail "APP_DIR '$APP_DIR' is not a git clone"
+
+            # Where the site is served from is something nginx already knows, so
+            # ask it rather than making someone dig the path out by hand. An
+            # explicit WEB_ROOT still wins if one is configured.
+            if [ -z "$WEB_ROOT" ]; then
+              WEB_ROOT=$(nginx -T 2>/dev/null \
+                | awk '$1 == "root" { gsub(/;/, "", $2); print $2 }' \
+                | grep -v 'example\.com' | sort -u | head -1)
+              [ -n "$WEB_ROOT" ] || fail "Could not work out the web root from nginx. Set a WEB_ROOT secret."
+              echo "    resolved WEB_ROOT from nginx: $WEB_ROOT"
+            else
+              echo "    using configured WEB_ROOT: $WEB_ROOT"
+            fi
+
             [ -d "$WEB_ROOT" ]     || fail "WEB_ROOT '$WEB_ROOT' does not exist on the server"
             [ -w "$WEB_ROOT" ]     || fail "WEB_ROOT '$WEB_ROOT' is not writable by $(whoami)"
             command -v node >/dev/null || fail "node is not on PATH for this SSH session"
@@ -125,7 +140,16 @@ jobs:
             npm run build
 
             echo "==> Publishing web to $WEB_ROOT"
-            cp -r "$APP_DIR/web/dist/." "$WEB_ROOT/"
+            # nginx may already point straight at the build directory, in which
+            # case copying it onto itself would be pointless and could clobber
+            # files mid-read. Only copy when the two are genuinely different.
+            DIST="$APP_DIR/web/dist"
+            if [ "$(readlink -f "$WEB_ROOT")" = "$(readlink -f "$DIST")" ]; then
+              echo "    web root is the build directory itself — nothing to copy"
+            else
+              cp -r "$DIST/." "$WEB_ROOT/"
+              echo "    copied $DIST -> $WEB_ROOT"
+            fi
 
             # The Android build ships in the repo because the server cannot
             # build an APK; make sure the download the website links to is the
