@@ -162,7 +162,9 @@ router.delete('/current', authenticateJwt, requireTenant, requireRole(['OWNER'])
 
       // 9. Delete Business
       await tx.business.delete({ where: { id: bizId } });
-    });
+    },
+    // A shop with real history needs more than Prisma's 5s interactive default.
+    { timeout: 30_000, maxWait: 10_000 });
 
     res.json({ success: true, message: 'Business and all associated data permanently deleted.' });
   } catch (error) {

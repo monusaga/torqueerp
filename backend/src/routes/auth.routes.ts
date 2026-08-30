@@ -381,16 +381,36 @@ router.delete('/account', authenticateJwt, async (req: Request, res: Response, n
           select: { businessId: true },
         });
 
-        // Every business-scoped relation in the schema declares
-        // `onDelete: Cascade`, so one delete per business removes its products,
-        // sales, invoices, payments, members and settings in a single statement.
-        // Deleting each table by hand issued 20+ extra round trips per business
-        // and pushed real-shop accounts past the transaction timeout, which
-        // surfaced in the app as "delete does nothing".
-        if (owned.length > 0) {
-          await tx.business.deleteMany({
-            where: { id: { in: owned.map((o) => o.businessId) } },
-          });
+        // Relying on the database to cascade works on SQLite but fails on the
+        // MySQL used in production: several tables are reachable from Business
+        // by two foreign keys at once — a Payment hangs off the business
+        // (cascade) and off its sale (set null) — and MySQL will not resolve a
+        // row being deleted and nulled by the same statement. It aborts, so an
+        // account that had ever recorded a sale could not be deleted at all.
+        // Removing the children in dependency order avoids the ambiguity and
+        // behaves identically on both engines.
+        for (const { businessId } of owned) {
+          await tx.returnItem.deleteMany({ where: { return: { businessId } } });
+          await tx.return.deleteMany({ where: { businessId } });
+          await tx.payment.deleteMany({ where: { businessId } });
+          await tx.saleItem.deleteMany({ where: { sale: { businessId } } });
+          await tx.invoice.deleteMany({ where: { businessId } });
+          await tx.sale.deleteMany({ where: { businessId } });
+          await tx.purchaseItem.deleteMany({ where: { purchase: { businessId } } });
+          await tx.purchase.deleteMany({ where: { businessId } });
+          await tx.stockMovement.deleteMany({ where: { businessId } });
+          await tx.productPriceHistory.deleteMany({ where: { businessId } });
+          await tx.product.deleteMany({ where: { businessId } });
+          await tx.productCategory.deleteMany({ where: { businessId } });
+          await tx.productBrand.deleteMany({ where: { businessId } });
+          await tx.customer.deleteMany({ where: { businessId } });
+          await tx.supplier.deleteMany({ where: { businessId } });
+          await tx.notification.deleteMany({ where: { businessId } });
+          await tx.auditLog.deleteMany({ where: { businessId } });
+          await tx.tenantSetting.deleteMany({ where: { businessId } });
+          await tx.subscription.deleteMany({ where: { businessId } });
+          await tx.businessMember.deleteMany({ where: { businessId } });
+          await tx.business.delete({ where: { id: businessId } });
         }
 
         // Memberships in businesses owned by someone else, plus this user's

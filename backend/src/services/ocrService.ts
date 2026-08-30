@@ -35,7 +35,7 @@ export function normalizeCode(value: string | null | undefined): string {
 // patterns stay deliberately loose: parenthetical lines, "of all", and
 // misspelling-tolerant tax/incl stems are all rejected.
 const NAME_BLACKLIST =
-  /^\s*\(|REGD|OFFICE|DISTRICT|COUNTRY|ORIGIN|MFD|MFG|NET\s*QTY|CUSTOMER|CODE|TAX|TAKES|TAXE|IN+CL|OF\s+ALL|M\.?R\.?P|RETAIL|PRICE|WWW\.|\bLTD\b|\bPVT\b|BATCH|DATE|MADE\s+IN|WARRANTY|HELPLINE|EMAIL|PHONE|ADDRESS|FLOOR|WALK|CENTRE|CENTER|GST|CIN\b/i;
+  /^\s*\(|REGD|OFFICE|DISTRICT|COUNTRY|ORIGIN|MFD|MFG|NET\s*QTY|CUSTOMER|CODE|TAX|TAKES|TAXE|IN+CL|OF\s+ALL|M\.?R\.?P|RETAIL|PRICE|WWW\.|\bLTD\b|\bPVT\b|BATCH|DATE|MADE\s+IN|WARRANTY|HELPLINE|EMAIL|PHONE|ADDRESS|FLOOR|WALK|CENTRE|CENTER|GST|CIN\b|GENUINE|SPARE\s*PART|\bAG\b/i;
 
 // Multi-brand support: OEMs, component makers and consumables. Any Indian
 // spare-part label the counter receives should resolve to a brand here.
@@ -218,9 +218,17 @@ export class LocalOCRService implements OCRProvider {
     let mfgConfidence = 0;
     for (const line of lines) {
       const upper = line.toUpperCase();
-      const found = BRANDS_BY_SPECIFICITY.find(b => upper.includes(b));
-      if (found) {
-        detectedMfg = found;
+      // A line can name two brands — "KTM AG / BAJAJ AUTO LTD" is the maker
+      // followed by the licensee. Take whichever is printed first, and use
+      // length only to settle an overlap at the same position, so "UNO MINDA"
+      // still beats the "MINDA" sitting inside it.
+      const matches = BRANDS_BY_SPECIFICITY
+        .map((b) => ({ brand: b, at: upper.indexOf(b) }))
+        .filter((m) => m.at >= 0)
+        .sort((a, b) => a.at - b.at || b.brand.length - a.brand.length);
+
+      if (matches.length > 0) {
+        detectedMfg = matches[0].brand;
         mfgConfidence = 90;
         break;
       }
@@ -248,7 +256,11 @@ export class LocalOCRService implements OCRProvider {
       if (labeledMrp.test(l) || labeledPartNo.test(l)) return false;
       const letters = (l.match(/[A-Za-z]/g) || []).length;
       const digits = (l.match(/[0-9]/g) || []).length;
-      return letters >= 4 && letters > digits * 2;
+      // Spare-part names routinely carry a size — "OIL SEAL, 20X32X6",
+      // "BOLT 6X30", "BEARING 6203". Demanding twice as many letters as digits
+      // threw those away; requiring only that letters not be outnumbered keeps
+      // them while still rejecting a line that is mostly a code.
+      return letters >= 4 && letters >= digits;
     };
 
     if (!detectedName && partNoLineIdx >= 0) {
