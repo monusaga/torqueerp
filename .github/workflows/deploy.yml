@@ -203,8 +203,13 @@ jobs:
                 done
               fi
               if [ -z "$WEB_ROOT" ]; then
-                WEB_ROOT=$(echo "$ROOTS" | head -1)
-                note "no root looked like the site; falling back to '$WEB_ROOT'"
+                # The only root this nginx declares is its stock welcome page,
+                # yet the live site tracks this repo's build output — the site is
+                # served from a container that mounts the build directory. So the
+                # build directory is the publish target; copying into the host's
+                # nginx root would write somewhere nothing reads.
+                WEB_ROOT="$APP_DIR/web/dist"
+                note "no nginx root serves the site; publishing to the build directory '$WEB_ROOT'"
               fi
             else
               echo "    using configured WEB_ROOT: $WEB_ROOT"
@@ -283,6 +288,7 @@ jobs:
             STAGE="Publishing the Android build"
             echo "==> Publishing the Android build"
             APK_SRC="$APP_DIR/web/public/downloads"
+            note "APK in checkout: $(ls -1 "$APK_SRC"/*.apk 2>/dev/null | wc -l) file(s); in build output: $(ls -1 "$APP_DIR/web/dist/downloads"/*.apk 2>/dev/null | wc -l) file(s)"
             if ls "$APK_SRC"/*.apk >/dev/null 2>&1; then
               mkdir -p "$WEB_ROOT/downloads" "$APP_DIR/backend/public/downloads"
               cp -f "$APK_SRC"/*.apk "$WEB_ROOT/downloads/" \
