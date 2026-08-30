@@ -174,7 +174,7 @@ jobs:
                 | awk '$1 == "root" { gsub(/;/, "", $2); print $2 }' \
                 | grep -v 'example\.com' | sort -u)
               [ -n "$ROOTS" ] || fail "Could not work out the web root from nginx. Set a WEB_ROOT secret."
-              echo "    nginx roots: $(echo $ROOTS)"
+              note "nginx roots: $(echo $ROOTS) | dist: $APP_DIR/web/dist (exists: $([ -d "$APP_DIR/web/dist" ] && echo yes || echo no))"
 
               # Several server blocks can declare a root, and the default one is
               # not the site. Prefer the root that is the app's own build output,
@@ -184,19 +184,19 @@ jobs:
               WEB_ROOT=""
               for r in $ROOTS; do
                 if [ "$(readlink -f "$r" 2>/dev/null)" = "$(readlink -f "$DIST" 2>/dev/null)" ]; then
-                  WEB_ROOT="$r"; echo "    chose '$r' — it is the build directory"; break
+                  WEB_ROOT="$r"; note "chose root '$r' — it is the build directory"; break
                 fi
               done
               if [ -z "$WEB_ROOT" ]; then
                 for r in $ROOTS; do
                   if ls "$r"/assets/index-*.js >/dev/null 2>&1; then
-                    WEB_ROOT="$r"; echo "    chose '$r' — it already serves a built bundle"; break
+                    WEB_ROOT="$r"; note "chose root '$r' — it already serves a built bundle"; break
                   fi
                 done
               fi
               if [ -z "$WEB_ROOT" ]; then
                 WEB_ROOT=$(echo "$ROOTS" | head -1)
-                echo "    no root looked like the site; falling back to '$WEB_ROOT'"
+                note "no root looked like the site; falling back to '$WEB_ROOT'"
               fi
             else
               echo "    using configured WEB_ROOT: $WEB_ROOT"
@@ -245,11 +245,15 @@ jobs:
             # case copying it onto itself would be pointless and could clobber
             # files mid-read. Only copy when the two are genuinely different.
             DIST="$APP_DIR/web/dist"
+            [ -d "$DIST" ] || fail "The web build produced no '$DIST' directory."
             if [ "$(readlink -f "$WEB_ROOT")" = "$(readlink -f "$DIST")" ]; then
-              echo "    web root is the build directory itself — nothing to copy"
+              note "web root is the build directory itself — nothing to copy"
             else
-              cp -r "$DIST/." "$WEB_ROOT/"
-              echo "    copied $DIST -> $WEB_ROOT"
+              # Report what cp actually said; "exit 1" alone gives nothing to act on.
+              if ! cp_err=$(cp -r "$DIST/." "$WEB_ROOT/" 2>&1); then
+                fail "Copying the site into '$WEB_ROOT' failed: ${cp_err:-no error text}"
+              fi
+              note "copied $DIST -> $WEB_ROOT"
             fi
 
             # The Android build ships in the repo because the server cannot
