@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Camera, X, Check, RefreshCw, AlertCircle, ScanBarcode, FileText } from 'lucide-react';
+import { Camera, X, Check, RefreshCw, AlertCircle, ScanBarcode, FileText, Upload } from 'lucide-react';
 import { Html5Qrcode } from 'html5-qrcode';
 import { apiRequest } from '../lib/api';
 
@@ -28,6 +28,7 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
   const [isScanning, setIsScanning] = useState(false);
   const [isProcessingOcr, setIsProcessingOcr] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [ocrProgress, setOcrProgress] = useState<string>('');
   
   // OCR Review State
   const [extractedData, setExtractedData] = useState<ScannerResult | null>(null);
@@ -42,6 +43,7 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -118,77 +120,138 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
       setIsScanning(true);
     } catch (err: any) {
       console.warn('OCR camera stream error:', err);
-      setErrorMsg('Could not access camera for photo capture.');
+      setErrorMsg('Camera not available or permission denied. Use "Upload Label Photo Instead" below.');
+    }
+  };
+
+  // Reads the label text on the device with Tesseract.js, then lets the
+  // server turn that text into part number / name / MRP fields. The server
+  // never sees the image. Logged-in users hit the tenant endpoint; the public
+  // landing-page demo uses the no-database /ocr/demo endpoint.
+  const showReview = (result: ScannerResult) => {
+    setExtractedData(result);
+    setReviewFields({
+      partNumber: result.partNumber || '',
+      partName: result.partName || '',
+      mrp: result.mrp ? result.mrp.toString() : '',
+      barcode: result.barcode || '',
+    });
+  };
+
+  const prepareCanvasForOcr = (source: CanvasImageSource, width: number, height: number) => {
+    // Upscale small frames and convert to high-contrast grayscale: Tesseract
+    // reads printed labels far more reliably this way.
+    const canvas = canvasRef.current || document.createElement('canvas');
+    const scale = Math.min(2, Math.max(1, 1600 / Math.max(width, height)));
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return canvas;
+    ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const d = img.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      const v = Math.max(0, Math.min(255, (g - 128) * 1.5 + 128));
+      d[i] = d[i + 1] = d[i + 2] = v;
+    }
+    ctx.putImageData(img, 0, 0);
+    return canvas;
+  };
+
+  const runOcr = async (canvas: HTMLCanvasElement) => {
+    setIsProcessingOcr(true);
+    setErrorMsg(null);
+    setOcrProgress('Loading OCR engine...');
+    try {
+      const Tesseract = await import('tesseract.js');
+      const { data } = await Tesseract.recognize(canvas, 'eng', {
+        logger: (m: { status: string; progress: number }) => {
+          if (m.status === 'recognizing text') {
+            setOcrProgress(`Reading text ${Math.round(m.progress * 100)}%`);
+          }
+        },
+      });
+      const text = (data?.text || '').trim();
+      if (text.length < 3) {
+        setErrorMsg('No readable text found. Hold the label flat, fill the frame, use good light and try again, or type the details below.');
+        showReview({});
+        return;
+      }
+
+      const loggedIn = !!localStorage.getItem('torque_token');
+      const res = await apiRequest<{
+        extracted: {
+          partNumber: { value: string | null; confidence: number };
+          partName: { value: string | null; confidence: number };
+          mrp: { value: number | null; confidence: number };
+          barcode: { value: string | null; confidence: number };
+        };
+      }>(loggedIn ? '/ocr/process' : '/ocr/demo', {
+        method: 'POST',
+        body: JSON.stringify({ text: text.slice(0, loggedIn ? 20000 : 4000) }),
+      });
+
+      const ex = res.extracted;
+      const result: ScannerResult = {
+        partNumber: ex.partNumber.value || '',
+        partName: ex.partName.value || '',
+        mrp: ex.mrp.value || 0,
+        barcode: ex.barcode.value || '',
+        confidence: {
+          partNumber: ex.partNumber.value ? ex.partNumber.confidence : 0,
+          partName: ex.partName.value ? ex.partName.confidence : 0,
+          mrp: ex.mrp.value ? ex.mrp.confidence : 0,
+          barcode: ex.barcode.value ? ex.barcode.confidence : 0,
+        },
+      };
+      if (!result.partNumber && !result.partName && !result.mrp) {
+        setErrorMsg('Text was read but no part number, name or MRP was recognised. Please check the fields below.');
+      }
+      showReview(result);
+    } catch (err: any) {
+      console.warn('OCR failed:', err);
+      setErrorMsg(
+        err?.message
+          ? `OCR could not finish: ${err.message}. You can type the details below.`
+          : 'OCR could not finish (check your internet connection). You can type the details below.'
+      );
+      // Never show made-up sample data as if it had been scanned.
+      showReview({});
+    } finally {
+      setIsProcessingOcr(false);
+      setOcrProgress('');
     }
   };
 
   const captureAndProcessOcr = async () => {
-    if (!videoRef.current || !canvasRef.current) return;
-
-    setIsProcessingOcr(true);
-    setErrorMsg(null);
-
     const video = videoRef.current;
-    const canvas = canvasRef.current;
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
+    if (!video || !video.videoWidth) {
+      setErrorMsg('Camera is not ready yet. Wait a second, or upload a photo of the label instead.');
+      return;
+    }
+    const canvas = prepareCanvasForOcr(video, video.videoWidth, video.videoHeight);
+    await stopAllStreams();
+    await runOcr(canvas);
+  };
 
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-
-      try {
-        const res = await apiRequest<{
-          extracted: {
-            partNumber: { value: string; confidence: number };
-            partName: { value: string; confidence: number };
-            mrp: { value: number; confidence: number };
-            barcode: { value: string; confidence: number };
-          };
-        }>('/ocr/process', {
-          method: 'POST',
-          body: JSON.stringify({ imageBase64: dataUrl }),
-        });
-
-        const ex = res.extracted;
-        const result: ScannerResult = {
-          partNumber: ex.partNumber.value || '',
-          partName: ex.partName.value || '',
-          mrp: ex.mrp.value || 0,
-          barcode: ex.barcode.value || '',
-          confidence: {
-            partNumber: ex.partNumber.confidence,
-            partName: ex.partName.confidence,
-            mrp: ex.mrp.confidence,
-            barcode: ex.barcode.confidence,
-          },
-        };
-
-        setExtractedData(result);
-        setReviewFields({
-          partNumber: result.partNumber || '',
-          partName: result.partName || '',
-          mrp: result.mrp ? result.mrp.toString() : '',
-          barcode: result.barcode || '',
-        });
-      } catch (err: any) {
-        const mockFallback: ScannerResult = {
-          partNumber: 'RAH00140/B',
-          partName: 'Front Brake Pad Set',
-          mrp: 550,
-          confidence: { partNumber: 94, partName: 82, mrp: 96 },
-        };
-        setExtractedData(mockFallback);
-        setReviewFields({
-          partNumber: mockFallback.partNumber || '',
-          partName: mockFallback.partName || '',
-          mrp: mockFallback.mrp?.toString() || '',
-          barcode: '',
-        });
-      } finally {
-        setIsProcessingOcr(false);
-      }
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setErrorMsg('Please choose a photo (JPG or PNG) of the label.');
+      return;
+    }
+    try {
+      const bitmap = await createImageBitmap(file);
+      const canvas = prepareCanvasForOcr(bitmap, bitmap.width, bitmap.height);
+      bitmap.close?.();
+      await stopAllStreams();
+      await runOcr(canvas);
+    } catch (err) {
+      console.warn('Photo decode failed:', err);
+      setErrorMsg('This photo could not be opened. Try a JPG or PNG image.');
     }
   };
 
@@ -290,7 +353,7 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
                     {isProcessingOcr ? (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin text-amber-400" />
-                        <span>Reading text...</span>
+                        <span>{ocrProgress || 'Reading text...'}</span>
                       </>
                     ) : (
                       <>
@@ -300,6 +363,26 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
                     )}
                   </button>
                 </div>
+              )}
+              {activeTab === 'OCR' && (
+                <>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handlePhotoUpload}
+                  />
+                  <button
+                    type="button"
+                    disabled={isProcessingOcr}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full py-3 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-800 rounded-xl font-bold text-xs uppercase tracking-wider transition flex items-center justify-center space-x-2 border border-slate-200"
+                  >
+                    <Upload className="w-4 h-4 text-amber-600" />
+                    <span>{isProcessingOcr ? ocrProgress || 'Reading text...' : 'Upload Label Photo Instead'}</span>
+                  </button>
+                </>
               )}
             </div>
           ) : (
@@ -313,9 +396,9 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
                 <div>
                   <div className="flex justify-between items-center mb-1">
                     <label className="text-slate-700 font-bold">Part Number</label>
-                    {extractedData.confidence?.partNumber && (
+                    {(extractedData.confidence?.partNumber ?? 0) > 0 && (
                       <span className="text-xs text-emerald-700 font-mono font-bold">
-                        {extractedData.confidence.partNumber}% confidence
+                        {extractedData.confidence?.partNumber}% confidence
                       </span>
                     )}
                   </div>
@@ -333,9 +416,9 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
                 <div>
                   <div className="flex justify-between items-center mb-1">
                     <label className="text-slate-700 font-bold">Part Name / Description</label>
-                    {extractedData.confidence?.partName && (
+                    {(extractedData.confidence?.partName ?? 0) > 0 && (
                       <span className="text-xs text-emerald-700 font-mono font-bold">
-                        {extractedData.confidence.partName}% confidence
+                        {extractedData.confidence?.partName}% confidence
                       </span>
                     )}
                   </div>
@@ -353,9 +436,9 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
                 <div>
                   <div className="flex justify-between items-center mb-1">
                     <label className="text-slate-700 font-bold">MRP (₹)</label>
-                    {extractedData.confidence?.mrp && (
+                    {(extractedData.confidence?.mrp ?? 0) > 0 && (
                       <span className="text-xs text-emerald-700 font-mono font-bold">
-                        {extractedData.confidence.mrp}% confidence
+                        {extractedData.confidence?.mrp}% confidence
                       </span>
                     )}
                   </div>
