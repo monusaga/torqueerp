@@ -7,6 +7,7 @@ import { errorHandler } from './middleware/errorHandler.js';
 
 // Route imports
 import authRoutes from './routes/auth.routes.js';
+import facebookAuthRoutes from './routes/facebookAuth.routes.js';
 import businessRoutes from './routes/business.routes.js';
 import productRoutes from './routes/product.routes.js';
 import inventoryRoutes from './routes/inventory.routes.js';
@@ -110,6 +111,7 @@ app.get('/api/health', (_req, res) => {
 });
 
 // API Routes Mounting
+app.use('/api/v1/auth/facebook', facebookAuthRoutes);
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/businesses', businessRoutes);
 app.use('/api/v1/products', productRoutes);

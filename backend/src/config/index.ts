@@ -15,6 +15,9 @@ export const config = {
   googleClientId: process.env.GOOGLE_CLIENT_ID || '',
   // Firebase project ID (Firebase Authentication with the Google provider)
   firebaseProjectId: process.env.FIREBASE_PROJECT_ID || '',
+  // Facebook Login (Meta app "Monu Sagar ERP"). The secret lives only in .env.
+  facebookAppId: process.env.FACEBOOK_APP_ID || '1128531656404821',
+  facebookAppSecret: process.env.FACEBOOK_APP_SECRET || '',
   defaultCurrency: process.env.DEFAULT_CURRENCY || 'INR',
   defaultTimezone: process.env.DEFAULT_TIMEZONE || 'Asia/Kolkata',
 };

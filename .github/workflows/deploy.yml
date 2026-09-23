@@ -113,7 +113,12 @@ jobs:
             printf '%s\n' "$clean"
             echo 'SSH_KEY_EOF'
           } >> "$GITHUB_OUTPUT"
-          echo "::add-mask::$clean"
+          # ::add-mask:: only masks a single line. Given the whole multi-line
+          # key it registered the first line and PRINTED the rest into the
+          # public log. Mask every line of the key on its own instead.
+          printf '%s\n' "$clean" | while IFS= read -r line; do
+            if [ -n "$line" ]; then echo "::add-mask::$line"; fi
+          done
           echo "normalised to $(printf '%s\n' "$clean" | grep -c '') lines"
 
       - name: Deploy over SSH
